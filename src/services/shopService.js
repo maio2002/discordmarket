@@ -10,7 +10,6 @@ const CATEGORIES = [
   { id: 'roles',    label: 'Rollen',    emoji: '🏷️' },
   { id: 'services', label: 'Services',  emoji: '🔧' },
   { id: 'quests',   label: 'Quests',    emoji: '📋' },
-  { id: 'prestige', label: 'Prestige',  emoji: '⭐' },
   { id: 'jobs',     label: 'Jobs',      emoji: '💼' },
 ];
 

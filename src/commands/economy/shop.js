@@ -23,13 +23,8 @@ module.exports = {
         .setEmoji('💰')
         .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
-        .setCustomId('shop_send')
-        .setLabel('Senden')
-        .setEmoji('📤')
-        .setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder()
         .setCustomId('shop_offers')
-        .setLabel('Angebote')
+        .setLabel('Meldungen')
         .setEmoji('📬')
         .setStyle(ButtonStyle.Secondary),
     );
