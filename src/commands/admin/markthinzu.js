@@ -46,7 +46,7 @@ module.exports = {
           { name: 'Prestige', value: isPrestige ? 'Ja ⭐' : 'Nein', inline: true },
         ],
       });
-      await interaction.reply({ embeds: [embed] });
+      await interaction.reply({ embeds: [embed], ephemeral: true });
     } catch (err) {
       await interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
     }

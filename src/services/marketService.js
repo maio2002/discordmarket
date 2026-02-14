@@ -105,4 +105,16 @@ async function removeMarketRole(guildId, name) {
   return role;
 }
 
-module.exports = { seedInitialRoles, getShopRoles, buyRole, addMarketRole, removeMarketRole };
+async function getPrestigeRoles(guildId, page = 1, perPage = 5) {
+  const skip = (page - 1) * perPage;
+  const filter = { guildId, isPrestige: true };
+  const roles = await MarketRole.find(filter)
+    .sort({ price: 1 })
+    .skip(skip)
+    .limit(perPage)
+    .lean();
+  const total = await MarketRole.countDocuments(filter);
+  return { roles, total, totalPages: Math.ceil(total / perPage) || 1 };
+}
+
+module.exports = { seedInitialRoles, getShopRoles, getPrestigeRoles, buyRole, addMarketRole, removeMarketRole };

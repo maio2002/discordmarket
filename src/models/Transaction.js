@@ -9,7 +9,7 @@ const transactionSchema = new mongoose.Schema({
     enum: [
       'message_xp', 'voice_xp', 'weekly_bonus', 'job_salary',
       'role_purchase', 'own_role', 'prestige', 'trade',
-      'admin_give', 'admin_remove', 'speaker', 'examination',
+      'admin_give', 'admin_remove', 'speaker', 'examination', 'quest',
     ],
     required: true,
   },
