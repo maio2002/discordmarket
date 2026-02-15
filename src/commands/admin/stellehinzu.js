@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const JobListing = require('../../models/JobListing');
 const { createEmbed, COLORS } = require('../../utils/embedBuilder');
+const { formatCoins } = require('../../utils/formatters');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -12,33 +13,26 @@ module.exports = {
     .addStringOption(opt =>
       opt.setName('beschreibung').setDescription('Beschreibung der Stelle').setRequired(true)
     )
-    .addStringOption(opt =>
-      opt.setName('typ').setDescription('Stellentyp (z.B. Moderator, Support)')
-        .setRequired(true)
-        .addChoices(
-          { name: 'Moderator', value: 'moderator' },
-          { name: 'Support', value: 'support' },
-          { name: 'Advertisement', value: 'advertisement' },
-          { name: 'Examiner', value: 'examiner' },
-        )
+    .addRoleOption(opt =>
+      opt.setName('rolle').setDescription('Discord-Rolle, die der Bewerber erhält').setRequired(true)
     )
-    .addChannelOption(opt =>
-      opt.setName('bewerbungschannel').setDescription('Channel für Bewerbungen').setRequired(true)
+    .addIntegerOption(opt =>
+      opt.setName('gehalt').setDescription('Wöchentliches Gehalt in Coins').setRequired(true).setMinValue(1)
     )
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
   async execute(interaction) {
     const title = interaction.options.getString('titel');
     const description = interaction.options.getString('beschreibung');
-    const type = interaction.options.getString('typ');
-    const channel = interaction.options.getChannel('bewerbungschannel');
+    const role = interaction.options.getRole('rolle');
+    const salary = interaction.options.getInteger('gehalt');
 
     try {
       await JobListing.create({
         guildId: interaction.guild.id,
         title,
         description,
-        type,
-        applicationChannelId: channel.id,
+        roleId: role.id,
+        salary,
       });
 
       const embed = createEmbed({
@@ -46,8 +40,8 @@ module.exports = {
         color: COLORS.JOB,
         fields: [
           { name: 'Titel', value: title, inline: true },
-          { name: 'Typ', value: type, inline: true },
-          { name: 'Bewerbungschannel', value: `${channel}`, inline: true },
+          { name: 'Rolle', value: `<@&${role.id}>`, inline: true },
+          { name: 'Gehalt/Woche', value: formatCoins(salary), inline: true },
         ],
         description: `> ${description}`,
       });

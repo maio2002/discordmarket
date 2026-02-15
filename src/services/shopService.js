@@ -285,9 +285,10 @@ async function renderJobsPage(guildId, page = 1) {
     return { embed, components: [buildCategoryRow('jobs')], totalPages: 1 };
   }
 
-  const lines = listings.map(j =>
-    `**${j.title}**\n> ${j.description}\n> 📂 Typ: ${j.type}`
-  );
+  const lines = listings.map(j => {
+    const role = j.roleId ? `<@&${j.roleId}>` : '';
+    return `**${j.title}**\n> ${j.description}\n> 💰 Gehalt: ${formatCoins(j.salary || 0)}/Woche${role ? ` • Rolle: ${role}` : ''}`;
+  });
 
   const embed = createEmbed({
     title: '💼 Stellenangebote',
@@ -307,7 +308,7 @@ async function renderJobsPage(guildId, page = 1) {
       .addOptions(
         listings.slice(0, 25).map(j => ({
           label: j.title,
-          description: j.type,
+          description: `Gehalt: ${formatCoins(j.salary || 0)}/Woche`,
           value: j._id.toString(),
           emoji: '💼',
         }))

@@ -194,6 +194,167 @@ async function handleButton(interaction) {
     }
   }
 
+  // Service ticket: Annehmen (Anbieter)
+  if (id.startsWith('service_accept_')) {
+    const Service = require('../models/Service');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const { formatCoins } = require('../utils/formatters');
+    const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+    const parts = id.split('_');
+    const serviceId = parts[2];
+    const requesterId = parts[3];
+    const channelId = parts[4];
+
+    const service = await Service.findById(serviceId).lean();
+    if (!service) {
+      return interaction.reply({ content: '❌ Dienstleistung nicht gefunden.', ephemeral: true });
+    }
+    if (interaction.user.id !== service.providerId) {
+      return interaction.reply({ content: '❌ Nur der Anbieter kann diese Anfrage annehmen.', ephemeral: true });
+    }
+
+    const embed = createEmbed({
+      title: '✅ Dienstleistung angenommen!',
+      color: COLORS.SUCCESS,
+      description: `<@${service.providerId}> hat die Anfrage angenommen.\n\n> **${service.name}** — ${formatCoins(service.price)}\n\nDer Ticket-Channel bleibt offen. Sobald die Dienstleistung erbracht wurde, kann <@${requesterId}> sie als abgeschlossen markieren.`,
+    });
+
+    const completeRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`service_complete_${serviceId}_${requesterId}_${channelId}`)
+        .setLabel('Abgeschlossen')
+        .setEmoji('✅')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`service_cancel_${serviceId}_${requesterId}_${channelId}`)
+        .setLabel(`Stornieren (${formatCoins(Math.ceil(service.price / 2))})`)
+        .setEmoji('🚫')
+        .setStyle(ButtonStyle.Danger),
+    );
+
+    await interaction.update({ embeds: [embed], components: [completeRow] });
+    return;
+  }
+
+  // Service ticket: Abgeschlossen (Kunde/Nachfrager)
+  if (id.startsWith('service_complete_')) {
+    const coinService = require('../services/coinService');
+    const Service = require('../models/Service');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const { formatCoins } = require('../utils/formatters');
+    const parts = id.split('_');
+    const serviceId = parts[2];
+    const requesterId = parts[3];
+    const channelId = parts[4];
+
+    if (interaction.user.id !== requesterId) {
+      return interaction.reply({ content: '❌ Nur der Auftraggeber kann die Dienstleistung als abgeschlossen markieren.', ephemeral: true });
+    }
+
+    const service = await Service.findById(serviceId).lean();
+    if (!service) {
+      return interaction.reply({ content: '❌ Dienstleistung nicht gefunden.', ephemeral: true });
+    }
+
+    try {
+      await coinService.transfer(interaction.guild.id, requesterId, service.providerId, service.price, 'service', `Dienstleistung: ${service.name}`);
+
+      const embed = createEmbed({
+        title: '🎉 Dienstleistung abgeschlossen!',
+        color: COLORS.SUCCESS,
+        description: `<@${requesterId}> hat die Dienstleistung **${service.name}** als abgeschlossen markiert.\n\n> **${formatCoins(service.price)}** wurden an <@${service.providerId}> übertragen.\n\nDieser Channel wird in 10 Sekunden gelöscht.`,
+      });
+      await interaction.update({ embeds: [embed], components: [] });
+
+      setTimeout(async () => {
+        try {
+          const ch = await interaction.guild.channels.fetch(channelId);
+          if (ch) await ch.delete();
+        } catch {}
+      }, 10000);
+    } catch (err) {
+      return interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
+    }
+    return;
+  }
+
+  // Service ticket: Stornieren (Kunde/Nachfrager — halber Preis)
+  if (id.startsWith('service_cancel_')) {
+    const coinService = require('../services/coinService');
+    const Service = require('../models/Service');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const { formatCoins } = require('../utils/formatters');
+    const parts = id.split('_');
+    const serviceId = parts[2];
+    const requesterId = parts[3];
+    const channelId = parts[4];
+
+    if (interaction.user.id !== requesterId) {
+      return interaction.reply({ content: '❌ Nur der Auftraggeber kann die Dienstleistung stornieren.', ephemeral: true });
+    }
+
+    const service = await Service.findById(serviceId).lean();
+    if (!service) {
+      return interaction.reply({ content: '❌ Dienstleistung nicht gefunden.', ephemeral: true });
+    }
+
+    const cancelFee = Math.ceil(service.price / 2);
+
+    try {
+      await coinService.transfer(interaction.guild.id, requesterId, service.providerId, cancelFee, 'service', `Stornierung: ${service.name} (50%)`);
+
+      const embed = createEmbed({
+        title: '🚫 Dienstleistung storniert',
+        color: COLORS.WARNING,
+        description: `<@${requesterId}> hat die Dienstleistung **${service.name}** storniert.\n\n> Stornogebühr: **${formatCoins(cancelFee)}** (50%) an <@${service.providerId}> übertragen.\n\nDieser Channel wird in 10 Sekunden gelöscht.`,
+      });
+      await interaction.update({ embeds: [embed], components: [] });
+
+      setTimeout(async () => {
+        try {
+          const ch = await interaction.guild.channels.fetch(channelId);
+          if (ch) await ch.delete();
+        } catch {}
+      }, 10000);
+    } catch (err) {
+      return interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
+    }
+    return;
+  }
+
+  // Service ticket: Ablehnen (Anbieter)
+  if (id.startsWith('service_deny_')) {
+    const Service = require('../models/Service');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const parts = id.split('_');
+    const serviceId = parts[2];
+    const requesterId = parts[3];
+    const channelId = parts[4];
+
+    const service = await Service.findById(serviceId).lean();
+    if (!service) {
+      return interaction.reply({ content: '❌ Dienstleistung nicht gefunden.', ephemeral: true });
+    }
+    if (interaction.user.id !== service.providerId) {
+      return interaction.reply({ content: '❌ Nur der Anbieter kann diese Anfrage ablehnen.', ephemeral: true });
+    }
+
+    const embed = createEmbed({
+      title: '❌ Dienstleistung abgelehnt',
+      color: COLORS.ERROR,
+      description: `<@${service.providerId}> hat die Anfrage von <@${requesterId}> für **${service.name}** abgelehnt.\n\nDieser Channel wird in 10 Sekunden gelöscht.`,
+    });
+    await interaction.update({ embeds: [embed], components: [] });
+
+    setTimeout(async () => {
+      try {
+        const ch = await interaction.guild.channels.fetch(channelId);
+        if (ch) await ch.delete();
+      } catch {}
+    }, 10000);
+    return;
+  }
+
   // Shop open button
   if (id === 'shop_open') {
     const { buildShopResponse } = require('../services/shopService');
@@ -849,10 +1010,23 @@ async function handleSelectMenu(interaction) {
       return interaction.reply({ content: '❌ Diese Stelle ist nicht mehr verfügbar.', ephemeral: true });
     }
 
+    // Assign the job role to the user
+    if (listing.roleId) {
+      try {
+        const member = await interaction.guild.members.fetch(interaction.user.id);
+        await member.roles.add(listing.roleId);
+      } catch (err) {
+        const logger = require('../utils/logger');
+        logger.error(`Job-Rolle konnte nicht zugewiesen werden: ${err.message}`);
+        return interaction.reply({ content: '❌ Die Job-Rolle konnte nicht zugewiesen werden. Kontaktiere einen Admin.', ephemeral: true });
+      }
+    }
+
+    const roleInfo = listing.roleId ? `\nRolle erhalten: <@&${listing.roleId}>` : '';
     const embed = createEmbed({
-      title: '💼 Bewerbung',
+      title: '💼 Job angenommen!',
       color: COLORS.JOB,
-      description: `Stelle: **${listing.title}**\n\nBewirb dich hier: <#${listing.applicationChannelId}>`,
+      description: `Stelle: **${listing.title}**${roleInfo}`,
     });
     await interaction.reply({ embeds: [embed], ephemeral: true });
     return;
@@ -1149,11 +1323,12 @@ async function handleModal(interaction) {
     });
   }
 
-  // Service anfragen
+  // Service anfragen — Ticket erstellen
   if (id.startsWith('modal_service_request_')) {
     const Service = require('../models/Service');
-    const Offer = require('../models/Offer');
     const { formatCoins } = require('../utils/formatters');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const { ChannelType, PermissionFlagsBits, OverwriteType, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
     const serviceId = id.replace('modal_service_request_', '');
     const message = interaction.fields.getTextInputValue('message');
 
@@ -1162,18 +1337,51 @@ async function handleModal(interaction) {
       return interaction.reply({ content: '❌ Diese Dienstleistung ist nicht mehr verfügbar.', ephemeral: true });
     }
 
-    await Offer.create({
-      guildId: interaction.guild.id,
-      senderId: interaction.user.id,
-      targetId: service.providerId,
-      type: 'service',
-      description: message,
-      price: service.price,
-      serviceName: service.name,
+    const guild = interaction.guild;
+    const requesterMember = await guild.members.fetch(interaction.user.id);
+    const providerMember = await guild.members.fetch(service.providerId);
+    const requesterName = requesterMember.displayName.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20);
+    const serviceName = service.name.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20);
+
+    const channel = await guild.channels.create({
+      name: `service-${serviceName}-${requesterName}`,
+      type: ChannelType.GuildText,
+      permissionOverwrites: [
+        { id: guild.id, type: OverwriteType.Role, deny: [PermissionFlagsBits.ViewChannel] },
+        { id: requesterMember.id, type: OverwriteType.Member, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+        { id: providerMember.id, type: OverwriteType.Member, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+      ],
     });
 
+    const embed = createEmbed({
+      title: `🔧 Dienstleistung: ${service.name}`,
+      description: `${service.description}\n\n**Nachricht von <@${interaction.user.id}>:**\n> ${message}`,
+      color: COLORS.MARKET,
+      fields: [
+        { name: 'Anfrage von', value: `<@${interaction.user.id}>`, inline: true },
+        { name: 'Anbieter', value: `<@${service.providerId}>`, inline: true },
+        { name: 'Preis', value: formatCoins(service.price), inline: true },
+      ],
+      footer: 'Der Anbieter kann die Anfrage annehmen oder ablehnen.',
+    });
+
+    const buttons = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`service_accept_${serviceId}_${interaction.user.id}_${channel.id}`)
+        .setLabel('Annehmen')
+        .setEmoji('✅')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`service_deny_${serviceId}_${interaction.user.id}_${channel.id}`)
+        .setLabel('Ablehnen')
+        .setEmoji('❌')
+        .setStyle(ButtonStyle.Danger),
+    );
+
+    await channel.send({ embeds: [embed], components: [buttons] });
+
     return interaction.reply({
-      content: `✅ Anfrage für **${service.name}** (${formatCoins(service.price)}) an <@${service.providerId}> gesendet! Der Dienstleister erhält die Anfrage in seinem Postfach.`,
+      content: `✅ Ticket für **${service.name}** erstellt: <#${channel.id}>`,
       ephemeral: true,
     });
   }

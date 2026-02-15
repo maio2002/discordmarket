@@ -16,7 +16,7 @@ module.exports = {
     const filtered = listings
       .filter(j => j.title.toLowerCase().includes(focused))
       .slice(0, 25)
-      .map(j => ({ name: `${j.title} (${j.type})`, value: j._id.toString() }));
+      .map(j => ({ name: j.title, value: j._id.toString() }));
     await interaction.respond(filtered);
   },
   async execute(interaction) {
