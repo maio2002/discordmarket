@@ -1,36 +1,9 @@
 const User = require('../models/User');
-const { XP, COINS } = require('../constants');
+const { COINS, LEVEL } = require('../constants');
 const logger = require('../utils/logger');
 
-function xpForLevel(level) {
-  return Math.floor(XP.LEVEL_FORMULA_BASE * Math.pow(level, XP.LEVEL_FORMULA_EXPONENT));
-}
-
-function totalXpForLevel(level) {
-  let total = 0;
-  for (let i = 1; i <= level; i++) {
-    total += xpForLevel(i);
-  }
-  return total;
-}
-
-function getLevelFromXp(xp) {
-  let level = 0;
-  let cumulative = 0;
-  while (level < XP.MAX_LEVEL) {
-    const needed = xpForLevel(level + 1);
-    if (cumulative + needed > xp) break;
-    level++;
-    cumulative += needed;
-  }
-  return level;
-}
-
-function getXpProgress(xp, level) {
-  const currentLevelTotal = totalXpForLevel(level);
-  const nextLevelXp = xpForLevel(level + 1);
-  const progress = xp - currentLevelTotal;
-  return { current: progress, needed: nextLevelXp };
+function costForLevel(level) {
+  return Math.floor(LEVEL.FORMULA_BASE * Math.pow(level, LEVEL.FORMULA_EXPONENT));
 }
 
 async function getOrCreateUser(guildId, userId) {
@@ -41,15 +14,9 @@ async function getOrCreateUser(guildId, userId) {
   return user;
 }
 
-async function addXp(guildId, userId, amount, source = 'unknown') {
+async function addCoins(guildId, userId, amount, source = 'unknown') {
   const user = await getOrCreateUser(guildId, userId);
-  user.xp += amount;
-  user.totalXpEarned += amount;
   user.coins += amount;
-
-  const oldLevel = user.level;
-  const newLevel = getLevelFromXp(user.xp);
-  user.level = newLevel;
 
   await user.save();
 
@@ -61,31 +28,68 @@ async function addXp(guildId, userId, amount, source = 'unknown') {
       type: source,
       amount,
       balanceAfter: user.coins,
-      description: `+${amount} XP/Coins (${source})`,
+      description: `+${amount} Coins (${source})`,
     });
   } catch {
   }
 
-  const leveledUp = newLevel > oldLevel;
-  if (leveledUp) {
-    logger.info(`${userId} hat Level ${newLevel} erreicht! (${guildId})`);
-  }
-
-  return { user, leveledUp, oldLevel, newLevel };
+  return { user };
 }
 
-async function setXp(guildId, userId, amount) {
+async function levelUp(guildId, userId, amount) {
   const user = await getOrCreateUser(guildId, userId);
-  user.xp = amount;
-  user.level = getLevelFromXp(amount);
+
+  if (user.level >= LEVEL.MAX_LEVEL) {
+    throw new Error('Du hast bereits das maximale Level erreicht.');
+  }
+
+  if (amount <= 0) {
+    throw new Error('Bitte gib einen gültigen Betrag ein.');
+  }
+
+  if (user.coins < amount) {
+    throw new Error(`Du hast nur **${user.coins} Coins**, brauchst aber **${amount} Coins**.`);
+  }
+
+  const oldLevel = user.level;
+  let spent = 0;
+
+  while (user.level < LEVEL.MAX_LEVEL && spent + costForLevel(user.level + 1) <= amount) {
+    spent += costForLevel(user.level + 1);
+    user.level += 1;
+  }
+
+  if (user.level === oldLevel) {
+    const nextCost = costForLevel(user.level + 1);
+    throw new Error(`Du brauchst mindestens **${nextCost} Coins** für das nächste Level.`);
+  }
+
+  user.coins -= spent;
   await user.save();
-  return user;
+
+  try {
+    const Transaction = require('../models/Transaction');
+    await Transaction.create({
+      guildId,
+      userId,
+      type: 'levelup',
+      amount: -spent,
+      balanceAfter: user.coins,
+      description: `Aufleveln von Level ${oldLevel} auf ${user.level}`,
+    });
+  } catch {
+  }
+
+  logger.info(`${userId} hat Level ${user.level} erreicht! (${guildId})`);
+
+  return { user, cost: spent, oldLevel, newLevel: user.level };
 }
 
 async function getRank(guildId, userId) {
+  const user = await getOrCreateUser(guildId, userId);
   const count = await User.countDocuments({
     guildId,
-    xp: { $gt: (await getOrCreateUser(guildId, userId)).xp },
+    level: { $gt: user.level },
   });
   return count + 1;
 }
@@ -93,7 +97,7 @@ async function getRank(guildId, userId) {
 async function getLeaderboard(guildId, page = 1, perPage = 10) {
   const skip = (page - 1) * perPage;
   const users = await User.find({ guildId })
-    .sort({ xp: -1 })
+    .sort({ level: -1, coins: -1 })
     .skip(skip)
     .limit(perPage)
     .lean();
@@ -102,13 +106,10 @@ async function getLeaderboard(guildId, page = 1, perPage = 10) {
 }
 
 module.exports = {
-  xpForLevel,
-  totalXpForLevel,
-  getLevelFromXp,
-  getXpProgress,
+  costForLevel,
   getOrCreateUser,
-  addXp,
-  setXp,
+  addCoins,
+  levelUp,
   getRank,
   getLeaderboard,
 };

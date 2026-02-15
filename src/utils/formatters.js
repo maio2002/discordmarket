@@ -6,10 +6,6 @@ function formatCoins(amount) {
   return `${formatNumber(amount)} Coins`;
 }
 
-function formatXp(amount) {
-  return `${formatNumber(amount)} XP`;
-}
-
 function formatDuration(ms) {
   const seconds = Math.floor(ms / 1000);
   const minutes = Math.floor(seconds / 60);
@@ -26,4 +22,4 @@ function formatTimestamp(date) {
   return `<t:${Math.floor(date.getTime() / 1000)}:R>`;
 }
 
-module.exports = { formatNumber, formatCoins, formatXp, formatDuration, formatTimestamp };
+module.exports = { formatNumber, formatCoins, formatDuration, formatTimestamp };

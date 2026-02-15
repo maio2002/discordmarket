@@ -23,7 +23,7 @@ function start(client) {
       for (const user of members) {
         if (isThisWeek(user.lastWeeklyBonus)) continue;
         try {
-          await xpService.addXp(user.guildId, user.userId, WEEKLY_BONUSES.MEMBER, 'weekly_bonus');
+          await xpService.addCoins(user.guildId, user.userId, WEEKLY_BONUSES.MEMBER, 'weekly_bonus');
           user.lastWeeklyBonus = new Date();
           await user.save();
           memberCount++;
@@ -35,7 +35,7 @@ function start(client) {
       const vips = await User.find({ isVip: true });
       for (const user of vips) {
         try {
-          await xpService.addXp(user.guildId, user.userId, WEEKLY_BONUSES.VIP, 'weekly_bonus');
+          await xpService.addCoins(user.guildId, user.userId, WEEKLY_BONUSES.VIP, 'weekly_bonus');
           vipCount++;
         } catch (err) {
           logger.error(`Weekly VIP Bonus Fehler (${user.userId}):`, err);

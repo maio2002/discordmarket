@@ -7,7 +7,7 @@ const Job = require('../../models/Job');
 const SpeakerSession = require('../../models/SpeakerSession');
 const xpService = require('../../services/xpService');
 const { createEmbed, COLORS } = require('../../utils/embedBuilder');
-const { formatCoins, formatXp, formatNumber } = require('../../utils/formatters');
+const { formatCoins, formatNumber } = require('../../utils/formatters');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -38,9 +38,9 @@ module.exports = {
       xpMap[entry._id] = { total: entry.total, count: entry.count };
     }
 
-    const messageXp = xpMap['message_xp'] || { total: 0, count: 0 };
-    const voiceXp = xpMap['voice_xp'] || { total: 0, count: 0 };
-    const weeklyXp = xpMap['weekly_bonus'] || { total: 0, count: 0 };
+    const messageCoins = xpMap['message'] || xpMap['message_xp'] || { total: 0, count: 0 };
+    const voiceCoins = xpMap['voice'] || xpMap['voice_xp'] || { total: 0, count: 0 };
+    const weeklyCoins = xpMap['weekly_bonus'] || { total: 0, count: 0 };
     const jobXp = xpMap['job_salary'] || { total: 0, count: 0 };
     const adminGive = xpMap['admin_give'] || { total: 0, count: 0 };
     const speakerXp = xpMap['speaker'] || { total: 0, count: 0 };
@@ -86,7 +86,6 @@ module.exports = {
           value: [
             `**Rang:** #${rank}`,
             `**Level:** ${user.level}`,
-            `**XP:** ${formatXp(user.xp)}`,
             `**Coins:** ${formatCoins(user.coins)}`,
             `**Gesamt verdient:** ${formatCoins(user.totalXpEarned)}`,
             `**Gesamt ausgegeben:** ${formatCoins(totalSpent)}`,
@@ -95,11 +94,11 @@ module.exports = {
           inline: false,
         },
         {
-          name: '💬 XP-Quellen',
+          name: '💬 Coin-Quellen',
           value: [
-            `Nachrichten: **${formatXp(messageXp.total)}** (${formatNumber(messageXp.count)}×)`,
-            `Voice: **${formatXp(voiceXp.total)}** (${formatNumber(voiceXp.count)} Min.)`,
-            `Wöchentlich: **${formatXp(weeklyXp.total)}** (${formatNumber(weeklyXp.count)}×)`,
+            `Nachrichten: **${formatCoins(messageCoins.total)}** (${formatNumber(messageCoins.count)}×)`,
+            `Voice: **${formatCoins(voiceCoins.total)}** (${formatNumber(voiceCoins.count)} Min.)`,
+            `Wöchentlich: **${formatCoins(weeklyCoins.total)}** (${formatNumber(weeklyCoins.count)}×)`,
             `Gehalt: **${formatCoins(jobXp.total)}** (${formatNumber(jobXp.count)}×)`,
             `Admin: **${formatCoins(adminGive.total)}** (${formatNumber(adminGive.count)}×)`,
           ].join('\n'),

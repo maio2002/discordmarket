@@ -125,7 +125,7 @@ async function handleButton(interaction) {
     return approvalService.handleCoinsApprovalButton(interaction);
   }
 
-  if (id.startsWith('trade_accept_direct_') || id.startsWith('trade_accept_role_') || id.startsWith('trade_deny_direct_')) {
+  if (id.startsWith('trade_accept_direct_') || id.startsWith('trade_accept_role_') || id.startsWith('trade_accept_service_') || id.startsWith('trade_deny_direct_')) {
     // Handled below (Offer-based accept/deny)
   } else if (id.startsWith('trade_accept_') || id.startsWith('trade_deny_')) {
     const tradeService = require('../services/tradeService');
@@ -207,10 +207,10 @@ async function handleButton(interaction) {
     const { createEmbed, COLORS } = require('../utils/embedBuilder');
     const { formatCoins } = require('../utils/formatters');
     const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-    const { XP } = require('../constants');
+    const { LEVEL } = require('../constants');
     const user = await xpService.getOrCreateUser(interaction.guild.id, interaction.user.id);
-    const { current, needed } = xpService.getXpProgress(user.xp, user.level);
-    const isMaxLevel = user.level >= XP.MAX_LEVEL;
+    const isMaxLevel = user.level >= LEVEL.MAX_LEVEL;
+    const nextLevelCost = isMaxLevel ? 0 : xpService.costForLevel(user.level + 1);
 
     const embed = createEmbed({
       title: '💰 Dein Kontostand',
@@ -219,65 +219,54 @@ async function handleButton(interaction) {
       thumbnail: interaction.user.displayAvatarURL(),
       fields: [
         { name: 'Level', value: `${user.level}${isMaxLevel ? ' (Max)' : ''}`, inline: true },
-        { name: 'XP', value: isMaxLevel ? 'Max erreicht' : `${current} / ${needed}`, inline: true },
+        { name: 'Nächstes Level', value: isMaxLevel ? 'Max erreicht' : formatCoins(nextLevelCost), inline: true },
       ],
     });
 
-    const buttons = [
+    const buttons = [];
+    if (!isMaxLevel) {
+      buttons.push(
+        new ButtonBuilder()
+          .setCustomId('shop_levelup')
+          .setLabel('Aufleveln')
+          .setEmoji('⬆️')
+          .setStyle(ButtonStyle.Primary),
+      );
+    }
+    buttons.push(
       new ButtonBuilder()
         .setCustomId('shop_send')
         .setLabel('Senden')
         .setEmoji('📤')
         .setStyle(ButtonStyle.Secondary),
-    ];
-    if (!isMaxLevel) {
-      const costToLevel = needed - current;
-      buttons.unshift(
-        new ButtonBuilder()
-          .setCustomId('shop_levelup')
-          .setLabel(`Aufleveln (${formatCoins(costToLevel)})`)
-          .setEmoji('⬆️')
-          .setStyle(ButtonStyle.Primary)
-          .setDisabled(user.coins < costToLevel),
-      );
-    }
+      new ButtonBuilder()
+        .setCustomId('shop_offers')
+        .setLabel('Meldungen')
+        .setEmoji('📬')
+        .setStyle(ButtonStyle.Secondary),
+    );
 
     const components = [new ActionRowBuilder().addComponents(buttons)];
     return interaction.reply({ embeds: [embed], components, ephemeral: true });
   }
 
-  // Level up button
+  // Level up button - show modal
   if (id === 'shop_levelup') {
-    const xpService = require('../services/xpService');
-    const coinService = require('../services/coinService');
-    const { createEmbed, COLORS } = require('../utils/embedBuilder');
-    const { formatCoins } = require('../utils/formatters');
-    const { XP } = require('../constants');
-    const user = await xpService.getOrCreateUser(interaction.guild.id, interaction.user.id);
-
-    if (user.level >= XP.MAX_LEVEL) {
-      return interaction.reply({ content: '❌ Du hast bereits das maximale Level erreicht.', ephemeral: true });
-    }
-
-    const { current, needed } = xpService.getXpProgress(user.xp, user.level);
-    const costToLevel = needed - current;
-
-    if (user.coins < costToLevel) {
-      return interaction.reply({ content: `❌ Du brauchst **${formatCoins(costToLevel)}**, hast aber nur **${formatCoins(user.coins)}**.`, ephemeral: true });
-    }
-
-    await coinService.removeCoins(interaction.guild.id, interaction.user.id, costToLevel, 'prestige', `Aufleveln auf Level ${user.level + 1}`);
-    user.xp += costToLevel;
-    user.level = xpService.getLevelFromXp(user.xp);
-    await user.save();
-
-    const embed = createEmbed({
-      title: '⬆️ Aufgeleveld!',
-      color: COLORS.GOLD,
-      description: `Du bist jetzt **Level ${user.level}**!\n\n> Bezahlt: **${formatCoins(costToLevel)}**\n> Neuer Kontostand: **${formatCoins(user.coins)}**`,
-      thumbnail: interaction.user.displayAvatarURL(),
-    });
-    return interaction.update({ embeds: [embed], components: [] });
+    const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
+    const modal = new ModalBuilder()
+      .setCustomId('modal_levelup')
+      .setTitle('Aufleveln');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('amount')
+          .setLabel('Wie viele Coins möchtest du einzahlen?')
+          .setPlaceholder('z.B. 500')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
+    );
+    return interaction.showModal(modal);
   }
 
   // Direct offer accept
@@ -373,6 +362,48 @@ async function handleButton(interaction) {
     }
   }
 
+  // Service request accept
+  if (id.startsWith('trade_accept_service_')) {
+    const coinService = require('../services/coinService');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const { formatCoins } = require('../utils/formatters');
+    const Offer = require('../models/Offer');
+    const offerId = id.replace('trade_accept_service_', '');
+    const offer = await Offer.findById(offerId);
+
+    if (!offer || offer.status !== 'pending') {
+      return interaction.reply({ content: '❌ Diese Anfrage ist nicht mehr gültig.', ephemeral: true });
+    }
+    if (interaction.user.id !== offer.targetId) {
+      return interaction.reply({ content: '❌ Diese Anfrage ist nicht für dich.', ephemeral: true });
+    }
+
+    try {
+      await coinService.transfer(interaction.guild.id, offer.senderId, offer.targetId, offer.price, 'service', `Dienstleistung: ${offer.serviceName}`);
+      offer.status = 'accepted';
+      await offer.save();
+
+      // Benachrichtigung für den Anfragenden
+      await Offer.create({
+        guildId: offer.guildId,
+        senderId: offer.targetId,
+        targetId: offer.senderId,
+        type: 'notification',
+        description: `✅ <@${offer.targetId}> hat deine Anfrage für **${offer.serviceName}** (${formatCoins(offer.price)}) angenommen.`,
+        price: offer.price,
+      });
+
+      const embed = createEmbed({
+        title: '✅ Service-Anfrage angenommen!',
+        color: COLORS.SUCCESS,
+        description: `Du hast die Anfrage von <@${offer.senderId}> für **${offer.serviceName}** angenommen.\n\n> **${formatCoins(offer.price)}** wurden dir gutgeschrieben.`,
+      });
+      return interaction.update({ embeds: [embed], components: [] });
+    } catch (err) {
+      return interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
+    }
+  }
+
   // Direct offer/role deny
   if (id.startsWith('trade_deny_direct_')) {
     const { createEmbed, COLORS } = require('../utils/embedBuilder');
@@ -391,9 +422,14 @@ async function handleButton(interaction) {
     await offer.save();
 
     // Benachrichtigung für den Sender
-    const notifDesc = offer.type === 'role'
-      ? `❌ <@${offer.targetId}> hat dein Rollenangebot **${offer.roleName}** abgelehnt.`
-      : `❌ <@${offer.targetId}> hat dein Angebot abgelehnt.`;
+    let notifDesc;
+    if (offer.type === 'role') {
+      notifDesc = `❌ <@${offer.targetId}> hat dein Rollenangebot **${offer.roleName}** abgelehnt.`;
+    } else if (offer.type === 'service') {
+      notifDesc = `❌ <@${offer.targetId}> hat deine Anfrage für **${offer.serviceName}** abgelehnt.`;
+    } else {
+      notifDesc = `❌ <@${offer.targetId}> hat dein Angebot abgelehnt.`;
+    }
     await Offer.create({
       guildId: offer.guildId,
       senderId: offer.targetId,
@@ -537,6 +573,9 @@ async function handleButton(interaction) {
       if (o.type === 'role') {
         return `**${i + 1}.** 🏷️ Rolle: **${o.roleName}**\n> Von: <@${o.senderId}> • Preis: ${formatCoins(o.price)}`;
       }
+      if (o.type === 'service') {
+        return `**${i + 1}.** 🔧 Service-Anfrage: **${o.serviceName}**\n> Von: <@${o.senderId}> • ${formatCoins(o.price)}\n> ${(o.description || '').slice(0, 80)}`;
+      }
       if (o.type === 'offer') {
         return `**${i + 1}.** 📋 Angebot von <@${o.senderId}>\n> ${o.description}\n> Preis: ${formatCoins(o.price)}`;
       }
@@ -572,6 +611,9 @@ async function handleButton(interaction) {
         if (o.type === 'role') {
           label = `🏷️ Rolle: ${o.roleName}`;
           description = `${formatCoins(o.price)}`;
+        } else if (o.type === 'service') {
+          label = `🔧 ${o.serviceName || 'Service'}`;
+          description = `${formatCoins(o.price)} • ${(o.description || '').slice(0, 30)}`;
         } else if (o.type === 'offer') {
           label = `📋 ${(o.description || '').slice(0, 40)}`;
           description = `${formatCoins(o.price)}`;
@@ -604,6 +646,10 @@ async function handleButton(interaction) {
     if (offer.type === 'role') {
       title = '🏷️ Rollenangebot';
       fields.unshift({ name: 'Rolle', value: `<@&${offer.roleId}>`, inline: true });
+    } else if (offer.type === 'service') {
+      title = '🔧 Service-Anfrage';
+      fields.unshift({ name: 'Dienstleistung', value: offer.serviceName || 'Unbekannt', inline: true });
+      fields.push({ name: 'Nachricht', value: offer.description || '-' });
     } else if (offer.type === 'offer') {
       title = '📋 Angebot';
       fields.unshift({ name: 'Beschreibung', value: offer.description });
@@ -618,7 +664,11 @@ async function handleButton(interaction) {
       fields,
     });
 
-    const acceptId = offer.type === 'role' ? `trade_accept_role_${offer._id}` : `trade_accept_direct_${offer._id}`;
+    let acceptId;
+    if (offer.type === 'role') acceptId = `trade_accept_role_${offer._id}`;
+    else if (offer.type === 'service') acceptId = `trade_accept_service_${offer._id}`;
+    else acceptId = `trade_accept_direct_${offer._id}`;
+
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(acceptId)
@@ -718,6 +768,37 @@ async function handleSelectMenu(interaction) {
     return;
   }
 
+  // Request service
+  if (id.startsWith('shop_service_request_')) {
+    const Service = require('../models/Service');
+    const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
+    const serviceId = interaction.values[0];
+    const service = await Service.findById(serviceId).lean();
+
+    if (!service || !service.isActive) {
+      return interaction.reply({ content: '❌ Diese Dienstleistung ist nicht mehr verfügbar.', ephemeral: true });
+    }
+
+    if (service.providerId === interaction.user.id) {
+      return interaction.reply({ content: '❌ Du kannst deine eigene Dienstleistung nicht anfragen.', ephemeral: true });
+    }
+
+    const modal = new ModalBuilder()
+      .setCustomId(`modal_service_request_${serviceId}`)
+      .setTitle(`${service.name.slice(0, 40)} anfragen`);
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('message')
+          .setLabel('Was möchtest du konkret?')
+          .setPlaceholder('Beschreibe dein Anliegen...')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true)
+      ),
+    );
+    return interaction.showModal(modal);
+  }
+
   // Claim quest
   if (id.startsWith('shop_quest_claim_')) {
     const questService = require('../services/questService');
@@ -788,6 +869,10 @@ async function handleSelectMenu(interaction) {
     if (offer.type === 'role') {
       title = '🏷️ Rollenangebot';
       fields.unshift({ name: 'Rolle', value: `<@&${offer.roleId}>`, inline: true });
+    } else if (offer.type === 'service') {
+      title = '🔧 Service-Anfrage';
+      fields.unshift({ name: 'Dienstleistung', value: offer.serviceName || 'Unbekannt', inline: true });
+      fields.push({ name: 'Nachricht', value: offer.description || '-' });
     } else if (offer.type === 'offer') {
       title = '📋 Angebot';
       fields.unshift({ name: 'Beschreibung', value: offer.description });
@@ -802,7 +887,11 @@ async function handleSelectMenu(interaction) {
       fields,
     });
 
-    const acceptId = offer.type === 'role' ? `trade_accept_role_${offer._id}` : `trade_accept_direct_${offer._id}`;
+    let acceptId;
+    if (offer.type === 'role') acceptId = `trade_accept_role_${offer._id}`;
+    else if (offer.type === 'service') acceptId = `trade_accept_service_${offer._id}`;
+    else acceptId = `trade_accept_direct_${offer._id}`;
+
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(acceptId)
@@ -894,6 +983,33 @@ async function handleUserSelectMenu(interaction) {
 async function handleModal(interaction) {
   const id = interaction.customId;
 
+  // Aufleveln
+  if (id === 'modal_levelup') {
+    const xpService = require('../services/xpService');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const { formatCoins } = require('../utils/formatters');
+    const amount = parseInt(interaction.fields.getTextInputValue('amount'));
+
+    if (isNaN(amount) || amount <= 0) {
+      return interaction.reply({ content: '❌ Bitte gib einen gültigen Betrag ein.', ephemeral: true });
+    }
+
+    try {
+      const { user, cost, oldLevel, newLevel } = await xpService.levelUp(interaction.guild.id, interaction.user.id, amount);
+      const levelsGained = newLevel - oldLevel;
+
+      const embed = createEmbed({
+        title: '⬆️ Aufgeleveld!',
+        color: COLORS.GOLD,
+        description: `Du bist jetzt **Level ${newLevel}**! (+${levelsGained} Level)\n\n> Bezahlt: **${formatCoins(cost)}**\n> Neuer Kontostand: **${formatCoins(user.coins)}**`,
+        thumbnail: interaction.user.displayAvatarURL(),
+      });
+      return interaction.reply({ embeds: [embed], ephemeral: true });
+    } catch (err) {
+      return interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
+    }
+  }
+
   // Coins senden
   if (id.startsWith('modal_send_coins_')) {
     const coinService = require('../services/coinService');
@@ -979,6 +1095,35 @@ async function handleModal(interaction) {
 
     return interaction.reply({
       content: `✅ Angebot an <@${targetId}> gesendet! Der User kann es unter 📬 Angebote einsehen.`,
+      ephemeral: true,
+    });
+  }
+
+  // Service anfragen
+  if (id.startsWith('modal_service_request_')) {
+    const Service = require('../models/Service');
+    const Offer = require('../models/Offer');
+    const { formatCoins } = require('../utils/formatters');
+    const serviceId = id.replace('modal_service_request_', '');
+    const message = interaction.fields.getTextInputValue('message');
+
+    const service = await Service.findById(serviceId).lean();
+    if (!service || !service.isActive) {
+      return interaction.reply({ content: '❌ Diese Dienstleistung ist nicht mehr verfügbar.', ephemeral: true });
+    }
+
+    await Offer.create({
+      guildId: interaction.guild.id,
+      senderId: interaction.user.id,
+      targetId: service.providerId,
+      type: 'service',
+      description: message,
+      price: service.price,
+      serviceName: service.name,
+    });
+
+    return interaction.reply({
+      content: `✅ Anfrage für **${service.name}** (${formatCoins(service.price)}) an <@${service.providerId}> gesendet! Der Dienstleister erhält die Anfrage in seinen Meldungen.`,
       ephemeral: true,
     });
   }

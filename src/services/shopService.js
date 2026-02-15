@@ -136,6 +136,21 @@ async function renderServicesPage(guildId, page = 1) {
   const pagination = buildPaginationRow('services', page, totalPages);
   if (pagination) components.push(pagination);
 
+  if (services.length > 0) {
+    const selectMenu = new StringSelectMenuBuilder()
+      .setCustomId(`shop_service_request_${page}`)
+      .setPlaceholder('Dienstleistung anfragen...')
+      .addOptions(
+        services.slice(0, 25).map(s => ({
+          label: s.name,
+          description: `${formatCoins(s.price)}`,
+          value: s._id.toString(),
+          emoji: '🔧',
+        }))
+      );
+    components.push(new ActionRowBuilder().addComponents(selectMenu));
+  }
+
   return { embed, components, totalPages };
 }
 

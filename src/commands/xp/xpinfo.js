@@ -1,44 +1,44 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { createEmbed, COLORS } = require('../../utils/embedBuilder');
-const { XP, WEEKLY_BONUSES } = require('../../constants');
+const { COINS, LEVEL, WEEKLY_BONUSES } = require('../../constants');
 const { formatNumber } = require('../../utils/formatters');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('xpinfo')
-    .setDescription('Erklärt das XP- und Level-System'),
+    .setDescription('Erklärt das Level- und Coin-System'),
   async execute(interaction) {
     const embed = createEmbed({
-      title: 'XP-System Übersicht',
+      title: 'Level-System Übersicht',
       color: COLORS.XP,
       fields: [
         {
-          name: '💬 Nachrichten-XP',
-          value: `**${XP.PER_MESSAGE} XP** pro Nachricht\nCooldown: ${XP.MESSAGE_COOLDOWN_MS / 1000} Sekunden`,
+          name: '💬 Nachrichten',
+          value: `**${COINS.PER_MESSAGE} Coins** pro Nachricht\nCooldown: ${COINS.MESSAGE_COOLDOWN_MS / 1000} Sekunden`,
           inline: true,
         },
         {
-          name: '🔊 Voice-XP',
-          value: `**${XP.PER_VOICE_MINUTE} XP** pro Minute\nMind. ${XP.VOICE_MIN_USERS + 1} Nutzer im Channel\nDarf nicht gemutet sein`,
+          name: '🔊 Voice-Chat',
+          value: `**${COINS.PER_VOICE_MINUTE} Coins** pro Minute\nMind. ${COINS.VOICE_MIN_USERS + 1} Nutzer im Channel\nDarf nicht gemutet sein`,
           inline: true,
         },
         {
-          name: '📊 Level-Formel',
-          value: `XP für Level N = ${XP.LEVEL_FORMULA_BASE} × N^${XP.LEVEL_FORMULA_EXPONENT}\nMax Level: **${XP.MAX_LEVEL}**`,
+          name: '⬆️ Aufleveln',
+          value: `Level-Ups kosten Coins.\nKosten für Level N = ${LEVEL.FORMULA_BASE} × N^${LEVEL.FORMULA_EXPONENT}\nMax Level: **${LEVEL.MAX_LEVEL}**`,
           inline: false,
         },
         {
           name: '🎁 Wöchentliche Boni',
-          value: `Member-Rolle: **${formatNumber(WEEKLY_BONUSES.MEMBER)} XP/Woche**\nVIP-Rolle: **${formatNumber(WEEKLY_BONUSES.VIP)} XP/Woche**`,
+          value: `Member-Rolle: **${formatNumber(WEEKLY_BONUSES.MEMBER)} Coins/Woche**\nVIP-Rolle: **${formatNumber(WEEKLY_BONUSES.VIP)} Coins/Woche**`,
           inline: false,
         },
         {
           name: '💰 Coins',
-          value: 'Coins werden zusammen mit XP verdient (1:1).\nXP sinkt nie — Coins können ausgegeben werden.',
+          value: 'Coins werden durch Nachrichten und Voice-Chat verdient.\nMit Coins kannst du im Shop einkaufen oder aufleveln.',
           inline: false,
         },
       ],
-      footer: 'MaioBot XP-System',
+      footer: 'MaioBot Level-System',
     });
 
     await interaction.reply({ embeds: [embed] });

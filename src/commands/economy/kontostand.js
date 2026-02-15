@@ -1,7 +1,7 @@
 const { SlashCommandBuilder } = require('discord.js');
 const xpService = require('../../services/xpService');
 const { createEmbed, COLORS } = require('../../utils/embedBuilder');
-const { formatCoins, formatXp } = require('../../utils/formatters');
+const { formatCoins } = require('../../utils/formatters');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -20,7 +20,6 @@ module.exports = {
       thumbnail: target.displayAvatarURL({ size: 128 }),
       fields: [
         { name: '💰 Coins', value: formatCoins(user.coins), inline: true },
-        { name: '📊 XP', value: formatXp(user.xp), inline: true },
         { name: '📈 Level', value: `${user.level}`, inline: true },
       ],
       footer: 'MaioBot Wirtschaft',

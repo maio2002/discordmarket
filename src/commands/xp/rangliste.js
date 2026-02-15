@@ -1,7 +1,7 @@
 const { SlashCommandBuilder } = require('discord.js');
 const xpService = require('../../services/xpService');
 const { createEmbed, COLORS } = require('../../utils/embedBuilder');
-const { formatXp } = require('../../utils/formatters');
+const { formatCoins } = require('../../utils/formatters');
 const { createPaginationRow } = require('../../utils/pagination');
 
 module.exports = {
@@ -32,7 +32,7 @@ module.exports = {
         const prefix = medals[pos - 1] || `**${pos}.**`;
         const member = await interaction.guild.members.fetch(u.userId).catch(() => null);
         const name = member?.displayName || `<@${u.userId}>`;
-        return `${prefix} ${name} — Level ${u.level} | ${formatXp(u.xp)}`;
+        return `${prefix} ${name} — Level ${u.level} | ${formatCoins(u.coins)}`;
       })
     );
 
@@ -64,7 +64,7 @@ module.exports = {
           const prefix = medals[pos - 1] || `**${pos}.**`;
           const member = await interaction.guild.members.fetch(u.userId).catch(() => null);
           const name = member?.displayName || `<@${u.userId}>`;
-          return `${prefix} ${name} — Level ${u.level} | ${formatXp(u.xp)}`;
+          return `${prefix} ${name} — Level ${u.level} | ${formatCoins(u.coins)}`;
         })
       );
 

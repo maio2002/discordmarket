@@ -22,11 +22,6 @@ module.exports = {
         .setLabel('Kontostand')
         .setEmoji('💰')
         .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId('shop_offers')
-        .setLabel('Meldungen')
-        .setEmoji('📬')
-        .setStyle(ButtonStyle.Secondary),
     );
     await interaction.reply({ embeds: [embed], components: [row] });
   },

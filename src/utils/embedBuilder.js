@@ -23,11 +23,4 @@ function createEmbed({ title, description, color = COLORS.PRIMARY, fields, foote
   return embed;
 }
 
-function xpProgressBar(current, needed, length = 20) {
-  const progress = Math.min(current / needed, 1);
-  const filled = Math.round(progress * length);
-  const empty = length - filled;
-  return '█'.repeat(filled) + '░'.repeat(empty);
-}
-
-module.exports = { COLORS, createEmbed, xpProgressBar };
+module.exports = { COLORS, createEmbed };

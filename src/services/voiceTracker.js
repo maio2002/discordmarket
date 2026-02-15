@@ -1,5 +1,5 @@
 const logger = require('../utils/logger');
-const { XP } = require('../constants');
+const { COINS } = require('../constants');
 
 const activeSessions = new Map();
 
@@ -49,13 +49,13 @@ async function tickVoiceXp(client) {
 
   for (const [channelId, users] of channels) {
     const eligible = users.filter(u => !u.isMuted);
-    if (eligible.length <= XP.VOICE_MIN_USERS) continue;
+    if (eligible.length <= COINS.VOICE_MIN_USERS) continue;
 
     for (const user of eligible) {
       try {
-        await xpService.addXp(user.guildId, user.userId, XP.PER_VOICE_MINUTE, 'voice_xp');
+        await xpService.addCoins(user.guildId, user.userId, COINS.PER_VOICE_MINUTE, 'voice');
       } catch (err) {
-        logger.error(`Voice-XP Fehler für ${user.userId}:`, err);
+        logger.error(`Voice-Coins Fehler für ${user.userId}:`, err);
       }
     }
   }
