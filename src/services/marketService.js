@@ -32,8 +32,12 @@ async function getShopRoles(guildId, page = 1, perPage = 10) {
   return { roles, total, totalPages: Math.ceil(total / perPage) };
 }
 
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 async function buyRole(guildId, userId, roleName, guild) {
-  const marketRole = await MarketRole.findOne({ guildId, name: { $regex: new RegExp(`^${roleName}$`, 'i') } });
+  const marketRole = await MarketRole.findOne({ guildId, name: { $regex: new RegExp(`^${escapeRegex(roleName)}$`, 'i') } });
   if (!marketRole) {
     throw new Error('Diese Rolle existiert nicht im Shop.');
   }
@@ -69,16 +73,20 @@ async function buyRole(guildId, userId, roleName, guild) {
   user.lastRoleBuy = new Date();
   await user.save();
 
+  let roleError = null;
   if (marketRole.roleId) {
     try {
       const member = await guild.members.fetch(userId);
       await member.roles.add(marketRole.roleId);
     } catch (err) {
       logger.error(`Rolle konnte nicht zugewiesen werden: ${err.message}`);
+      roleError = err.message;
     }
+  } else {
+    roleError = 'Keine Discord-Rolle verknüpft. Kontaktiere einen Admin.';
   }
 
-  return { marketRole, price };
+  return { marketRole, price, roleError };
 }
 
 async function addMarketRole(guildId, name, roleId, price, stock, isPrestige = false) {
@@ -98,7 +106,7 @@ async function addMarketRole(guildId, name, roleId, price, stock, isPrestige = f
 }
 
 async function removeMarketRole(guildId, name) {
-  const role = await MarketRole.findOneAndDelete({ guildId, name: { $regex: new RegExp(`^${name}$`, 'i') } });
+  const role = await MarketRole.findOneAndDelete({ guildId, name: { $regex: new RegExp(`^${escapeRegex(name)}$`, 'i') } });
   if (!role) {
     throw new Error('Diese Rolle existiert nicht im Shop.');
   }

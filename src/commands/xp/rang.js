@@ -7,7 +7,7 @@ const { LEVEL } = require('../../constants');
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('rang')
-    .setDescription('Zeigt deinen Rang, Level und Coins an')
+    .setDescription('Zeigt deinen Rang und Coins an')
     .addUserOption(opt =>
       opt.setName('nutzer').setDescription('Rang eines anderen Nutzers anzeigen')
     ),
@@ -18,16 +18,18 @@ module.exports = {
     const user = await xpService.getOrCreateUser(interaction.guild.id, target.id);
     const rank = await xpService.getRank(interaction.guild.id, target.id);
     const isMaxLevel = user.level >= LEVEL.MAX_LEVEL;
-    const nextLevelCost = isMaxLevel ? null : xpService.costForLevel(user.level + 1);
+    const currentRank = xpService.getRankName(user.level);
 
     const fields = [
-      { name: 'Rang', value: `#${rank}`, inline: true },
-      { name: 'Level', value: `${user.level}${isMaxLevel ? ' (Max)' : ''}`, inline: true },
+      { name: 'Platz', value: `#${rank}`, inline: true },
+      { name: 'Rang', value: user.level > 0 ? currentRank : 'Kein Rang', inline: true },
       { name: 'Coins', value: formatCoins(user.coins), inline: true },
     ];
 
     if (!isMaxLevel) {
-      fields.push({ name: 'Nächstes Level', value: formatCoins(nextLevelCost), inline: true });
+      const nextRank = xpService.getRankName(user.level + 1);
+      const nextCost = xpService.costForLevel(user.level + 1);
+      fields.push({ name: 'Nächster Rang', value: `${nextRank} — ${formatCoins(user.levelProgress || 0)}/${formatCoins(nextCost)}`, inline: true });
     }
 
     const embed = createEmbed({
@@ -35,7 +37,7 @@ module.exports = {
       color: COLORS.XP,
       thumbnail: target.displayAvatarURL({ size: 128 }),
       fields,
-      footer: 'MaioBot Level-System',
+      footer: 'MaioBot Rang-System',
     });
 
     await interaction.reply({ embeds: [embed] });

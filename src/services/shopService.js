@@ -66,7 +66,8 @@ async function renderRolesPage(guildId, page = 1) {
     const stock = r.totalStock - r.purchased;
     const tag = r.isPrestige ? ' ⭐' : '';
     const status = stock > 0 ? `${stock}/${r.totalStock}` : '❌ Ausverkauft';
-    return `**${i + 1}.** ${r.name}${tag}\n> 💰 ${formatCoins(r.price)} • Verfügbar: ${status}`;
+    const roleDisplay = r.roleId ? `<@&${r.roleId}>` : r.name;
+    return `**${i + 1}.** ${roleDisplay}${tag}\n> 💰 ${formatCoins(r.price)} • Verfügbar: ${status}`;
   });
 
   const embed = createEmbed({
@@ -223,7 +224,8 @@ async function renderPrestigePage(guildId, page = 1) {
   const lines = roles.map((r, i) => {
     const stock = r.totalStock - r.purchased;
     const status = stock > 0 ? `${stock}/${r.totalStock}` : '❌ Ausverkauft';
-    return `**${i + 1}.** ⭐ ${r.name}\n> 💰 ${formatCoins(6000)} • Verfügbar: ${status}`;
+    const roleDisplay = r.roleId ? `<@&${r.roleId}>` : r.name;
+    return `**${i + 1}.** ⭐ ${roleDisplay}\n> 💰 ${formatCoins(6000)} • Verfügbar: ${status}`;
   });
 
   const embed = createEmbed({

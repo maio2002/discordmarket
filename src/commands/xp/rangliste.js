@@ -32,7 +32,8 @@ module.exports = {
         const prefix = medals[pos - 1] || `**${pos}.**`;
         const member = await interaction.guild.members.fetch(u.userId).catch(() => null);
         const name = member?.displayName || `<@${u.userId}>`;
-        return `${prefix} ${name} — Level ${u.level} | ${formatCoins(u.coins)}`;
+        const rankName = xpService.getRankName(u.level);
+        return `${prefix} ${name} — ${u.level > 0 ? rankName : 'Kein Rang'} | ${formatCoins(u.coins)}`;
       })
     );
 
@@ -64,7 +65,8 @@ module.exports = {
           const prefix = medals[pos - 1] || `**${pos}.**`;
           const member = await interaction.guild.members.fetch(u.userId).catch(() => null);
           const name = member?.displayName || `<@${u.userId}>`;
-          return `${prefix} ${name} — Level ${u.level} | ${formatCoins(u.coins)}`;
+          const rankName = xpService.getRankName(u.level);
+        return `${prefix} ${name} — ${u.level > 0 ? rankName : 'Kein Rang'} | ${formatCoins(u.coins)}`;
         })
       );
 

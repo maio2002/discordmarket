@@ -1,15 +1,19 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { createEmbed, COLORS } = require('../../utils/embedBuilder');
 const { COINS, LEVEL, WEEKLY_BONUSES } = require('../../constants');
-const { formatNumber } = require('../../utils/formatters');
+const { formatNumber, formatCoins } = require('../../utils/formatters');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('xpinfo')
-    .setDescription('Erklärt das Level- und Coin-System'),
+    .setDescription('Erklärt das Rang- und Coin-System'),
   async execute(interaction) {
+    const rankList = LEVEL.RANKS.map((r, i) =>
+      `**${i + 1}.** ${r.name} — ${formatCoins(r.cost)}`
+    ).join('\n');
+
     const embed = createEmbed({
-      title: 'Level-System Übersicht',
+      title: 'Rang-System Übersicht',
       color: COLORS.XP,
       fields: [
         {
@@ -23,8 +27,8 @@ module.exports = {
           inline: true,
         },
         {
-          name: '⬆️ Aufleveln',
-          value: `Level-Ups kosten Coins.\nKosten für Level N = ${LEVEL.FORMULA_BASE} × N^${LEVEL.FORMULA_EXPONENT}\nMax Level: **${LEVEL.MAX_LEVEL}**`,
+          name: '⬆️ Ränge',
+          value: rankList,
           inline: false,
         },
         {
@@ -34,11 +38,11 @@ module.exports = {
         },
         {
           name: '💰 Coins',
-          value: 'Coins werden durch Nachrichten und Voice-Chat verdient.\nMit Coins kannst du im Shop einkaufen oder aufleveln.',
+          value: 'Coins werden durch Nachrichten und Voice-Chat verdient.\nMit Coins kannst du im Shop einkaufen oder aufsteigen.',
           inline: false,
         },
       ],
-      footer: 'MaioBot Level-System',
+      footer: 'MaioBot Rang-System',
     });
 
     await interaction.reply({ embeds: [embed] });

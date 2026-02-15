@@ -210,7 +210,9 @@ async function handleButton(interaction) {
     const { LEVEL } = require('../constants');
     const user = await xpService.getOrCreateUser(interaction.guild.id, interaction.user.id);
     const isMaxLevel = user.level >= LEVEL.MAX_LEVEL;
+    const currentRank = xpService.getRankName(user.level);
     const nextLevelCost = isMaxLevel ? 0 : xpService.costForLevel(user.level + 1);
+    const nextRank = isMaxLevel ? null : xpService.getRankName(user.level + 1);
 
     const embed = createEmbed({
       title: '💰 Dein Kontostand',
@@ -218,8 +220,8 @@ async function handleButton(interaction) {
       color: COLORS.GOLD,
       thumbnail: interaction.user.displayAvatarURL(),
       fields: [
-        { name: 'Level', value: `${user.level}${isMaxLevel ? ' (Max)' : ''}`, inline: true },
-        { name: 'Nächstes Level', value: isMaxLevel ? 'Max erreicht' : formatCoins(nextLevelCost), inline: true },
+        { name: 'Rang', value: user.level > 0 ? `${currentRank}` : 'Kein Rang', inline: true },
+        { name: 'Nächster Rang', value: isMaxLevel ? 'Max erreicht' : `${nextRank} — ${formatCoins(user.levelProgress || 0)}/${formatCoins(nextLevelCost)}`, inline: true },
       ],
     });
 
@@ -266,6 +268,7 @@ async function handleButton(interaction) {
           .setRequired(true)
       ),
     );
+    interaction.message.edit({ content: '⏳', embeds: [], components: [] }).catch(() => {});
     return interaction.showModal(modal);
   }
 
@@ -717,20 +720,24 @@ async function handleSelectMenu(interaction) {
     const roleName = interaction.values[0];
 
     try {
-      const { marketRole, price } = await marketService.buyRole(
+      const { marketRole, price, roleError } = await marketService.buyRole(
         interaction.guild.id,
         interaction.user.id,
         roleName,
         interaction.guild
       );
+      const fields = [
+        { name: 'Rolle', value: marketRole.name, inline: true },
+        { name: 'Preis', value: formatCoins(price), inline: true },
+        { name: 'Verbleibend', value: `${marketRole.totalStock - marketRole.purchased}`, inline: true },
+      ];
+      if (roleError) {
+        fields.push({ name: '⚠️ Hinweis', value: `Rolle konnte nicht zugewiesen werden: ${roleError}` });
+      }
       const embed = createEmbed({
-        title: '🎉 Rolle gekauft!',
-        color: COLORS.SUCCESS,
-        fields: [
-          { name: 'Rolle', value: marketRole.name, inline: true },
-          { name: 'Preis', value: formatCoins(price), inline: true },
-          { name: 'Verbleibend', value: `${marketRole.totalStock - marketRole.purchased}`, inline: true },
-        ],
+        title: roleError ? '⚠️ Rolle gekauft, aber nicht zugewiesen!' : '🎉 Rolle gekauft!',
+        color: roleError ? COLORS.WARNING : COLORS.SUCCESS,
+        fields,
       });
       await interaction.reply({ embeds: [embed], ephemeral: true });
     } catch (err) {
@@ -988,6 +995,8 @@ async function handleModal(interaction) {
     const xpService = require('../services/xpService');
     const { createEmbed, COLORS } = require('../utils/embedBuilder');
     const { formatCoins } = require('../utils/formatters');
+    const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+    const { LEVEL } = require('../constants');
     const amount = parseInt(interaction.fields.getTextInputValue('amount'));
 
     if (isNaN(amount) || amount <= 0) {
@@ -995,16 +1004,57 @@ async function handleModal(interaction) {
     }
 
     try {
-      const { user, cost, oldLevel, newLevel } = await xpService.levelUp(interaction.guild.id, interaction.user.id, amount);
+      const { user, cost, oldLevel, newLevel } = await xpService.levelUp(interaction.guild.id, interaction.user.id, amount, interaction.guild);
       const levelsGained = newLevel - oldLevel;
+      const isMaxLevel = user.level >= LEVEL.MAX_LEVEL;
+      const currentRank = xpService.getRankName(user.level);
+      const nextLevelCost = isMaxLevel ? 0 : xpService.costForLevel(user.level + 1);
+      const nextRank = isMaxLevel ? null : xpService.getRankName(user.level + 1);
+
+      let statusLine;
+      if (levelsGained > 0) {
+        const oldRank = xpService.getRankName(oldLevel);
+        statusLine = `⬆️ **Aufgestiegen!** ${oldLevel > 0 ? oldRank : 'Kein Rang'} → **${currentRank}**`;
+      } else {
+        statusLine = `💰 **${formatCoins(cost)}** eingezahlt!`;
+      }
 
       const embed = createEmbed({
-        title: '⬆️ Aufgeleveld!',
+        title: '💰 Dein Kontostand',
+        description: `${statusLine}\n\nDu hast **${formatCoins(user.coins)}**`,
         color: COLORS.GOLD,
-        description: `Du bist jetzt **Level ${newLevel}**! (+${levelsGained} Level)\n\n> Bezahlt: **${formatCoins(cost)}**\n> Neuer Kontostand: **${formatCoins(user.coins)}**`,
         thumbnail: interaction.user.displayAvatarURL(),
+        fields: [
+          { name: 'Rang', value: user.level > 0 ? currentRank : 'Kein Rang', inline: true },
+          { name: 'Nächster Rang', value: isMaxLevel ? 'Max erreicht' : `${nextRank} — ${formatCoins(user.levelProgress || 0)}/${formatCoins(nextLevelCost)}`, inline: true },
+        ],
       });
-      return interaction.reply({ embeds: [embed], ephemeral: true });
+
+      const buttons = [];
+      if (!isMaxLevel) {
+        buttons.push(
+          new ButtonBuilder()
+            .setCustomId('shop_levelup')
+            .setLabel('Aufleveln')
+            .setEmoji('⬆️')
+            .setStyle(ButtonStyle.Primary),
+        );
+      }
+      buttons.push(
+        new ButtonBuilder()
+          .setCustomId('shop_send')
+          .setLabel('Senden')
+          .setEmoji('📤')
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId('shop_offers')
+          .setLabel('Meldungen')
+          .setEmoji('📬')
+          .setStyle(ButtonStyle.Secondary),
+      );
+
+      const components = [new ActionRowBuilder().addComponents(buttons)];
+      return interaction.reply({ embeds: [embed], components, ephemeral: true });
     } catch (err) {
       return interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
     }

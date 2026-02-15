@@ -1,9 +1,17 @@
 const User = require('../models/User');
+const GuildConfig = require('../models/GuildConfig');
 const { COINS, LEVEL } = require('../constants');
 const logger = require('../utils/logger');
 
 function costForLevel(level) {
-  return Math.floor(LEVEL.FORMULA_BASE * Math.pow(level, LEVEL.FORMULA_EXPONENT));
+  if (level < 1 || level > LEVEL.MAX_LEVEL) return 0;
+  return LEVEL.RANKS[level - 1].cost;
+}
+
+function getRankName(level) {
+  if (level < 1) return 'Kein Rang';
+  if (level > LEVEL.MAX_LEVEL) return LEVEL.RANKS[LEVEL.MAX_LEVEL - 1].name;
+  return LEVEL.RANKS[level - 1].name;
 }
 
 async function getOrCreateUser(guildId, userId) {
@@ -36,11 +44,38 @@ async function addCoins(guildId, userId, amount, source = 'unknown') {
   return { user };
 }
 
-async function levelUp(guildId, userId, amount) {
+async function assignRankRole(guildId, userId, oldLevel, newLevel, guild) {
+  try {
+    const config = await GuildConfig.findOne({ guildId });
+    if (!config || !config.rankRoleIds || config.rankRoleIds.length === 0) return;
+
+    const member = await guild.members.fetch(userId);
+
+    // Alte Rang-Rolle entfernen
+    if (oldLevel >= 1 && oldLevel <= config.rankRoleIds.length) {
+      const oldRoleId = config.rankRoleIds[oldLevel - 1];
+      if (oldRoleId && member.roles.cache.has(oldRoleId)) {
+        await member.roles.remove(oldRoleId).catch(() => {});
+      }
+    }
+
+    // Neue Rang-Rolle hinzufügen
+    if (newLevel >= 1 && newLevel <= config.rankRoleIds.length) {
+      const newRoleId = config.rankRoleIds[newLevel - 1];
+      if (newRoleId) {
+        await member.roles.add(newRoleId).catch(() => {});
+      }
+    }
+  } catch (err) {
+    logger.error(`Rang-Rolle konnte nicht zugewiesen werden: ${err.message}`);
+  }
+}
+
+async function levelUp(guildId, userId, amount, guild) {
   const user = await getOrCreateUser(guildId, userId);
 
   if (user.level >= LEVEL.MAX_LEVEL) {
-    throw new Error('Du hast bereits das maximale Level erreicht.');
+    throw new Error(`Du hast bereits den höchsten Rang (**${getRankName(LEVEL.MAX_LEVEL)}**) erreicht.`);
   }
 
   if (amount <= 0) {
@@ -52,19 +87,21 @@ async function levelUp(guildId, userId, amount) {
   }
 
   const oldLevel = user.level;
-  let spent = 0;
+  user.coins -= amount;
+  user.levelProgress += amount;
 
-  while (user.level < LEVEL.MAX_LEVEL && spent + costForLevel(user.level + 1) <= amount) {
-    spent += costForLevel(user.level + 1);
+  // Level up so oft wie möglich
+  while (user.level < LEVEL.MAX_LEVEL && user.levelProgress >= costForLevel(user.level + 1)) {
+    user.levelProgress -= costForLevel(user.level + 1);
     user.level += 1;
   }
 
-  if (user.level === oldLevel) {
-    const nextCost = costForLevel(user.level + 1);
-    throw new Error(`Du brauchst mindestens **${nextCost} Coins** für das nächste Level.`);
+  // Falls Max-Level erreicht, überschüssige Coins zurückgeben
+  if (user.level >= LEVEL.MAX_LEVEL && user.levelProgress > 0) {
+    user.coins += user.levelProgress;
+    user.levelProgress = 0;
   }
 
-  user.coins -= spent;
   await user.save();
 
   try {
@@ -73,16 +110,22 @@ async function levelUp(guildId, userId, amount) {
       guildId,
       userId,
       type: 'levelup',
-      amount: -spent,
+      amount: -amount,
       balanceAfter: user.coins,
-      description: `Aufleveln von Level ${oldLevel} auf ${user.level}`,
+      description: user.level > oldLevel
+        ? `Aufgestiegen: ${getRankName(oldLevel || 0)} → ${getRankName(user.level)}`
+        : `${amount} Coins eingezahlt (${user.levelProgress}/${costForLevel(user.level + 1)})`,
     });
   } catch {
   }
 
-  logger.info(`${userId} hat Level ${user.level} erreicht! (${guildId})`);
+  // Rang-Rolle zuweisen
+  if (user.level > oldLevel && guild) {
+    await assignRankRole(guildId, userId, oldLevel, user.level, guild);
+    logger.info(`${userId} ist jetzt ${getRankName(user.level)}! (${guildId})`);
+  }
 
-  return { user, cost: spent, oldLevel, newLevel: user.level };
+  return { user, cost: amount, oldLevel, newLevel: user.level };
 }
 
 async function getRank(guildId, userId) {
@@ -107,6 +150,7 @@ async function getLeaderboard(guildId, page = 1, perPage = 10) {
 
 module.exports = {
   costForLevel,
+  getRankName,
   getOrCreateUser,
   addCoins,
   levelUp,

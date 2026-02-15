@@ -7,12 +7,12 @@ const { LEVEL } = require('../../constants');
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('setxp')
-    .setDescription('Setze das Level eines Nutzers manuell')
+    .setDescription('Setze den Rang eines Nutzers manuell')
     .addUserOption(opt =>
       opt.setName('nutzer').setDescription('Zielnutzer').setRequired(true)
     )
     .addIntegerOption(opt =>
-      opt.setName('betrag').setDescription('Neues Level').setRequired(true).setMinValue(0).setMaxValue(LEVEL.MAX_LEVEL)
+      opt.setName('betrag').setDescription('Neuer Rang (0-9)').setRequired(true).setMinValue(0).setMaxValue(LEVEL.MAX_LEVEL)
     )
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
   async execute(interaction) {
@@ -21,14 +21,17 @@ module.exports = {
 
     const user = await xpService.getOrCreateUser(interaction.guild.id, target.id);
     user.level = level;
+    user.levelProgress = 0;
     await user.save();
 
+    const rankName = xpService.getRankName(level);
+
     const embed = createEmbed({
-      title: 'Level gesetzt',
+      title: 'Rang gesetzt',
       color: COLORS.XP,
       fields: [
         { name: 'Nutzer', value: `<@${target.id}>`, inline: true },
-        { name: 'Neues Level', value: `${level}`, inline: true },
+        { name: 'Neuer Rang', value: level > 0 ? `${rankName} (${level})` : 'Kein Rang (0)', inline: true },
         { name: 'Gesetzt von', value: `<@${interaction.user.id}>`, inline: true },
       ],
     });

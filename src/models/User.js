@@ -7,6 +7,7 @@ const userSchema = new mongoose.Schema({
   level:           { type: Number, default: 0 },
   totalXpEarned:   { type: Number, default: 0 },
   coins:           { type: Number, default: 200 },
+  levelProgress:   { type: Number, default: 0 },
   lastMessageXp:   { type: Date, default: null },
   lastRoleBuy:     { type: Date, default: null },
   ownRoleCount:    { type: Number, default: 0 },

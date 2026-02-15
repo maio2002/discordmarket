@@ -9,6 +9,7 @@ const guildConfigSchema = new mongoose.Schema({
   memberRoleId:       { type: String, default: null },
   vipRoleId:          { type: String, default: null },
   adminRoleIds:       [{ type: String }],
+  rankRoleIds:        [{ type: String }],
   xpPerMessage:       { type: Number, default: 12 },
   xpPerVoiceMinute:   { type: Number, default: 12 },
   messageCooldownSec: { type: Number, default: 30 },

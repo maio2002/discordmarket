@@ -12,9 +12,18 @@ module.exports = {
     ROLE_BUY_COOLDOWN_MS: 20 * 60_000,
   },
   LEVEL: {
-    FORMULA_BASE: 100,
-    FORMULA_EXPONENT: 1.5,
-    MAX_LEVEL: 50,
+    MAX_LEVEL: 9,
+    RANKS: [
+      { name: 'Bauer',       cost: 200 },
+      { name: 'Handwerker',  cost: 500 },
+      { name: 'Händler',     cost: 1000 },
+      { name: 'Bürger',      cost: 2000 },
+      { name: 'Ritter',      cost: 4000 },
+      { name: 'Mönch',       cost: 7000 },
+      { name: 'Priester',    cost: 12000 },
+      { name: 'Graf',        cost: 20000 },
+      { name: 'König',       cost: 35000 },
+    ],
   },
   WEEKLY_BONUSES: {
     MEMBER: 2000,
