@@ -14,6 +14,26 @@ function getRankName(level) {
   return LEVEL.RANKS[level - 1].name;
 }
 
+async function getRankDisplay(guildId, level) {
+  if (level < 1) return 'Kein Rang';
+  const idx = Math.min(level, LEVEL.MAX_LEVEL) - 1;
+  const config = await GuildConfig.findOne({ guildId }).lean();
+  if (config && config.rankRoleIds && config.rankRoleIds[idx]) {
+    return `<@&${config.rankRoleIds[idx]}>`;
+  }
+  return LEVEL.RANKS[idx].name;
+}
+
+async function getAllRankDisplays(guildId) {
+  const config = await GuildConfig.findOne({ guildId }).lean();
+  return LEVEL.RANKS.map((r, i) => {
+    if (config && config.rankRoleIds && config.rankRoleIds[i]) {
+      return `<@&${config.rankRoleIds[i]}>`;
+    }
+    return r.name;
+  });
+}
+
 async function getOrCreateUser(guildId, userId) {
   let user = await User.findOne({ guildId, userId });
   if (!user) {
@@ -151,6 +171,8 @@ async function getLeaderboard(guildId, page = 1, perPage = 10) {
 module.exports = {
   costForLevel,
   getRankName,
+  getRankDisplay,
+  getAllRankDisplays,
   getOrCreateUser,
   addCoins,
   levelUp,

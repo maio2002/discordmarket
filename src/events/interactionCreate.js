@@ -210,9 +210,9 @@ async function handleButton(interaction) {
     const { LEVEL } = require('../constants');
     const user = await xpService.getOrCreateUser(interaction.guild.id, interaction.user.id);
     const isMaxLevel = user.level >= LEVEL.MAX_LEVEL;
-    const currentRank = xpService.getRankName(user.level);
+    const currentRank = await xpService.getRankDisplay(interaction.guild.id, user.level);
     const nextLevelCost = isMaxLevel ? 0 : xpService.costForLevel(user.level + 1);
-    const nextRank = isMaxLevel ? null : xpService.getRankName(user.level + 1);
+    const nextRank = isMaxLevel ? null : await xpService.getRankDisplay(interaction.guild.id, user.level + 1);
 
     const embed = createEmbed({
       title: '💰 Dein Kontostand',
@@ -220,7 +220,7 @@ async function handleButton(interaction) {
       color: COLORS.GOLD,
       thumbnail: interaction.user.displayAvatarURL(),
       fields: [
-        { name: 'Rang', value: user.level > 0 ? `${currentRank}` : 'Kein Rang', inline: true },
+        { name: 'Rang', value: user.level > 0 ? currentRank : 'Kein Rang', inline: true },
         { name: 'Nächster Rang', value: isMaxLevel ? 'Max erreicht' : `${nextRank} — ${formatCoins(user.levelProgress || 0)}/${formatCoins(nextLevelCost)}`, inline: true },
       ],
     });
@@ -1007,14 +1007,14 @@ async function handleModal(interaction) {
       const { user, cost, oldLevel, newLevel } = await xpService.levelUp(interaction.guild.id, interaction.user.id, amount, interaction.guild);
       const levelsGained = newLevel - oldLevel;
       const isMaxLevel = user.level >= LEVEL.MAX_LEVEL;
-      const currentRank = xpService.getRankName(user.level);
+      const currentRank = await xpService.getRankDisplay(interaction.guild.id, user.level);
       const nextLevelCost = isMaxLevel ? 0 : xpService.costForLevel(user.level + 1);
-      const nextRank = isMaxLevel ? null : xpService.getRankName(user.level + 1);
+      const nextRank = isMaxLevel ? null : await xpService.getRankDisplay(interaction.guild.id, user.level + 1);
 
       let statusLine;
       if (levelsGained > 0) {
-        const oldRank = xpService.getRankName(oldLevel);
-        statusLine = `⬆️ **Aufgestiegen!** ${oldLevel > 0 ? oldRank : 'Kein Rang'} → **${currentRank}**`;
+        const oldRank = await xpService.getRankDisplay(interaction.guild.id, oldLevel);
+        statusLine = `⬆️ **Aufgestiegen!** ${oldLevel > 0 ? oldRank : 'Kein Rang'} → ${currentRank}`;
       } else {
         statusLine = `💰 **${formatCoins(cost)}** eingezahlt!`;
       }

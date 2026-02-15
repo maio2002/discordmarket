@@ -2,14 +2,16 @@ const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = re
 const { createEmbed, COLORS } = require('../../utils/embedBuilder');
 const { COINS, LEVEL } = require('../../constants');
 const { formatCoins } = require('../../utils/formatters');
+const xpService = require('../../services/xpService');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('shop')
     .setDescription('Öffnet den Shop mit allen Kategorien'),
   async execute(interaction) {
+    const rankDisplays = await xpService.getAllRankDisplays(interaction.guild.id);
     const rankList = LEVEL.RANKS.map((r, i) =>
-      `**${i + 1}.** ${r.name} — ${formatCoins(r.cost)}`
+      `${rankDisplays[i]} — ${formatCoins(r.cost)}`
     ).join('\n');
 
     const embed = createEmbed({

@@ -2,14 +2,16 @@ const { SlashCommandBuilder } = require('discord.js');
 const { createEmbed, COLORS } = require('../../utils/embedBuilder');
 const { COINS, LEVEL, WEEKLY_BONUSES } = require('../../constants');
 const { formatNumber, formatCoins } = require('../../utils/formatters');
+const xpService = require('../../services/xpService');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('xpinfo')
     .setDescription('Erklärt das Rang- und Coin-System'),
   async execute(interaction) {
+    const rankDisplays = await xpService.getAllRankDisplays(interaction.guild.id);
     const rankList = LEVEL.RANKS.map((r, i) =>
-      `**${i + 1}.** ${r.name} — ${formatCoins(r.cost)}`
+      `${rankDisplays[i]} — ${formatCoins(r.cost)}`
     ).join('\n');
 
     const embed = createEmbed({

@@ -67,14 +67,12 @@ async function renderRolesPage(guildId, page = 1) {
     const stock = r.totalStock - r.purchased;
     const tag = r.isPrestige ? ' ⭐' : '';
     const status = stock > 0 ? `${stock}/${r.totalStock}` : '❌ Ausverkauft';
-    const roleDisplay = r.roleId ? `<@&${r.roleId}>` : r.name;
     fields.push({
-      name: `${r.name}${tag}`,
-      value: `${roleDisplay}\n💰 ${formatCoins(r.price)}\nVerfügbar: ${status}`,
+      name: `💰 ${formatCoins(r.price)}${tag}`,
+      value: `> ${r.roleId ? `<@&${r.roleId}>` : r.name}\n> Verfügbar: ${status}`,
       inline: true,
     });
   }
-  // Leeres Feld nach ungerader Anzahl für sauberes 2-Spalten-Layout
   if (fields.length % 2 !== 0) {
     fields.push({ name: '\u200b', value: '\u200b', inline: true });
   }
@@ -131,8 +129,8 @@ async function renderServicesPage(guildId, page = 1) {
     return { embed, components: [buildCategoryRow('services')], totalPages: 1 };
   }
 
-  const lines = services.map((s, i) =>
-    `**${i + 1}.** ${s.name}\n> ${s.description}\n> 💰 ${formatCoins(s.price)} • Anbieter: <@${s.providerId}>`
+  const lines = services.map(s =>
+    `**${s.name}**\n> ${s.description}\n> 💰 ${formatCoins(s.price)} • Anbieter: <@${s.providerId}>`
   );
 
   const embed = createEmbed({
@@ -182,9 +180,9 @@ async function renderQuestsPage(guildId, page = 1) {
     return { embed, components: [buildCategoryRow('quests')], totalPages: 1 };
   }
 
-  const lines = quests.map((q, i) => {
+  const lines = quests.map(q => {
     const participants = q.participants ? q.participants.length : 0;
-    return `**${i + 1}.** ${q.title}\n> ${q.description}\n> 🏆 Belohnung: ${formatCoins(q.reward)} • 👥 ${participants} Teilnehmer`;
+    return `**${q.title}**\n> ${q.description}\n> 🏆 Belohnung: ${formatCoins(q.reward)} • 👥 ${participants} Teilnehmer`;
   });
 
   const embed = createEmbed({
@@ -230,11 +228,11 @@ async function renderPrestigePage(guildId, page = 1) {
     return { embed, components: [buildCategoryRow('prestige')], totalPages: 1 };
   }
 
-  const lines = roles.map((r, i) => {
+  const lines = roles.map(r => {
     const stock = r.totalStock - r.purchased;
     const status = stock > 0 ? `${stock}/${r.totalStock}` : '❌ Ausverkauft';
     const roleDisplay = r.roleId ? `<@&${r.roleId}>` : r.name;
-    return `**${i + 1}.** ⭐ ${roleDisplay}\n> 💰 ${formatCoins(6000)} • Verfügbar: ${status}`;
+    return `**⭐ ${roleDisplay}**\n> 💰 ${formatCoins(6000)} • Verfügbar: ${status}`;
   });
 
   const embed = createEmbed({
@@ -287,8 +285,8 @@ async function renderJobsPage(guildId, page = 1) {
     return { embed, components: [buildCategoryRow('jobs')], totalPages: 1 };
   }
 
-  const lines = listings.map((j, i) =>
-    `**${i + 1}.** ${j.title}\n> ${j.description}\n> 📂 Typ: ${j.type}`
+  const lines = listings.map(j =>
+    `**${j.title}**\n> ${j.description}\n> 📂 Typ: ${j.type}`
   );
 
   const embed = createEmbed({

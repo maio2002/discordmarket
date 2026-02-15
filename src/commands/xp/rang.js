@@ -18,7 +18,7 @@ module.exports = {
     const user = await xpService.getOrCreateUser(interaction.guild.id, target.id);
     const rank = await xpService.getRank(interaction.guild.id, target.id);
     const isMaxLevel = user.level >= LEVEL.MAX_LEVEL;
-    const currentRank = xpService.getRankName(user.level);
+    const currentRank = await xpService.getRankDisplay(interaction.guild.id, user.level);
 
     const fields = [
       { name: 'Platz', value: `#${rank}`, inline: true },
@@ -27,7 +27,7 @@ module.exports = {
     ];
 
     if (!isMaxLevel) {
-      const nextRank = xpService.getRankName(user.level + 1);
+      const nextRank = await xpService.getRankDisplay(interaction.guild.id, user.level + 1);
       const nextCost = xpService.costForLevel(user.level + 1);
       fields.push({ name: 'Nächster Rang', value: `${nextRank} — ${formatCoins(user.levelProgress || 0)}/${formatCoins(nextCost)}`, inline: true });
     }
