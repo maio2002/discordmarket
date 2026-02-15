@@ -194,6 +194,85 @@ async function handleButton(interaction) {
     }
   }
 
+  // Offer ticket: Abgeschlossen (Auftraggeber)
+  if (id.startsWith('offer_complete_')) {
+    const coinService = require('../services/coinService');
+    const Offer = require('../models/Offer');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const { formatCoins } = require('../utils/formatters');
+    const parts = id.split('_');
+    const offerId = parts[2];
+    const channelId = parts[3];
+
+    const offer = await Offer.findById(offerId).lean();
+    if (!offer) {
+      return interaction.reply({ content: '❌ Dieser Auftrag existiert nicht mehr.', ephemeral: true });
+    }
+    if (interaction.user.id !== offer.senderId) {
+      return interaction.reply({ content: '❌ Nur der Auftraggeber kann den Auftrag abschließen.', ephemeral: true });
+    }
+
+    // Coins an Auftragnehmer zahlen
+    if (offer.price > 0) {
+      await coinService.transfer(interaction.guild.id, offer.senderId, offer.targetId, offer.price, 'trade', `Auftrag abgeschlossen: ${(offer.description || '').slice(0, 30)}`);
+    }
+
+    const embed = createEmbed({
+      title: '✅ Auftrag abgeschlossen!',
+      color: COLORS.SUCCESS,
+      description: `<@${offer.targetId}> hat **${formatCoins(offer.price || 0)}** für den Auftrag erhalten.\n\nDieser Channel wird in 10 Sekunden gelöscht.`,
+    });
+    await interaction.update({ embeds: [embed], components: [] });
+
+    setTimeout(async () => {
+      try {
+        const ch = await interaction.guild.channels.fetch(channelId);
+        if (ch) await ch.delete();
+      } catch {}
+    }, 10000);
+    return;
+  }
+
+  // Offer ticket: Stornieren (Auftraggeber)
+  if (id.startsWith('offer_cancel_')) {
+    const coinService = require('../services/coinService');
+    const Offer = require('../models/Offer');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const { formatCoins } = require('../utils/formatters');
+    const parts = id.split('_');
+    const offerId = parts[2];
+    const channelId = parts[3];
+
+    const offer = await Offer.findById(offerId).lean();
+    if (!offer) {
+      return interaction.reply({ content: '❌ Dieser Auftrag existiert nicht mehr.', ephemeral: true });
+    }
+    if (interaction.user.id !== offer.senderId) {
+      return interaction.reply({ content: '❌ Nur der Auftraggeber kann stornieren.', ephemeral: true });
+    }
+
+    // 50% Storno-Gebühr an Auftragnehmer
+    const cancelFee = Math.ceil((offer.price || 0) / 2);
+    if (cancelFee > 0) {
+      await coinService.transfer(interaction.guild.id, offer.senderId, offer.targetId, cancelFee, 'trade', `Storno-Gebühr: ${(offer.description || '').slice(0, 30)}`);
+    }
+
+    const embed = createEmbed({
+      title: '❌ Auftrag storniert',
+      color: COLORS.ERROR,
+      description: `Der Auftrag wurde storniert. <@${offer.targetId}> erhält **${formatCoins(cancelFee)}** als Storno-Gebühr.\n\nDieser Channel wird in 10 Sekunden gelöscht.`,
+    });
+    await interaction.update({ embeds: [embed], components: [] });
+
+    setTimeout(async () => {
+      try {
+        const ch = await interaction.guild.channels.fetch(channelId);
+        if (ch) await ch.delete();
+      } catch {}
+    }, 10000);
+    return;
+  }
+
   // Job ticket: Annehmen (Admin)
   if (id.startsWith('job_accept_')) {
     const JobListing = require('../models/JobListing');
@@ -444,6 +523,7 @@ async function handleButton(interaction) {
   // Shop balance button
   if (id === 'shop_balance') {
     const xpService = require('../services/xpService');
+    const Offer = require('../models/Offer');
     const { createEmbed, COLORS } = require('../utils/embedBuilder');
     const { formatCoins } = require('../utils/formatters');
     const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
@@ -454,15 +534,22 @@ async function handleButton(interaction) {
     const nextLevelCost = isMaxLevel ? 0 : xpService.costForLevel(user.level + 1);
     const nextRank = isMaxLevel ? null : await xpService.getRankDisplay(interaction.guild.id, user.level + 1);
 
+    const pendingCount = await Offer.countDocuments({ guildId: interaction.guild.id, targetId: interaction.user.id, status: 'pending' });
+
+    const fields = [
+      { name: 'Rang', value: user.level > 0 ? currentRank : 'Kein Rang', inline: true },
+      { name: 'Nächster Rang', value: isMaxLevel ? 'Max erreicht' : `${nextRank} — ${formatCoins(user.levelProgress || 0)}/${formatCoins(nextLevelCost)}`, inline: true },
+    ];
+    if (pendingCount > 0) {
+      fields.push({ name: '📬 Postfach', value: `**${pendingCount}** neue Meldung${pendingCount > 1 ? 'en' : ''}`, inline: true });
+    }
+
     const embed = createEmbed({
       title: '💰 Dein Kontostand',
       description: `Du hast **${formatCoins(user.coins)}**`,
       color: COLORS.GOLD,
       thumbnail: interaction.user.displayAvatarURL(),
-      fields: [
-        { name: 'Rang', value: user.level > 0 ? currentRank : 'Kein Rang', inline: true },
-        { name: 'Nächster Rang', value: isMaxLevel ? 'Max erreicht' : `${nextRank} — ${formatCoins(user.levelProgress || 0)}/${formatCoins(nextLevelCost)}`, inline: true },
-      ],
+      fields,
     });
 
     const buttons = [];
@@ -483,7 +570,7 @@ async function handleButton(interaction) {
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId('shop_offers')
-        .setLabel('Postfach')
+        .setLabel(pendingCount > 0 ? `Postfach (${pendingCount})` : 'Postfach')
         .setEmoji('📬')
         .setStyle(ButtonStyle.Secondary),
     );
@@ -529,26 +616,85 @@ async function handleButton(interaction) {
     }
 
     try {
-      await coinService.transfer(interaction.guild.id, offer.targetId, offer.senderId, offer.price, 'trade', 'Direktes Angebot angenommen');
+      if (offer.type === 'coins') {
+        // Coins wurden bereits vom Sender abgezogen — jetzt dem Empfänger gutschreiben
+        await coinService.addCoins(interaction.guild.id, offer.targetId, offer.price, 'trade', `Coins erhalten von <@${offer.senderId}>`);
+
+        offer.status = 'accepted';
+        await offer.save();
+
+        await Offer.create({
+          guildId: offer.guildId,
+          senderId: offer.targetId,
+          targetId: offer.senderId,
+          type: 'notification',
+          description: `✅ <@${offer.targetId}> hat deine Überweisung von **${formatCoins(offer.price)}** angenommen.`,
+          price: offer.price,
+        });
+
+        const embed = createEmbed({
+          title: '✅ Angenommen!',
+          color: COLORS.SUCCESS,
+          description: `Du hast **${formatCoins(offer.price)}** von <@${offer.senderId}> erhalten.`,
+        });
+        return interaction.update({ embeds: [embed], components: [] });
+      }
+
+      // Offer-Typ: Ticket erstellen
+      const { ChannelType, PermissionFlagsBits, OverwriteType, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+      const guild = interaction.guild;
+      const targetMember = await guild.members.fetch(offer.targetId);
+      const senderMember = await guild.members.fetch(offer.senderId);
+      const targetName = targetMember.displayName.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20);
+      const offerName = (offer.description || 'auftrag').toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20);
+
+      const channel = await guild.channels.create({
+        name: `auftrag-${offerName}-${targetName}`,
+        type: ChannelType.GuildText,
+        permissionOverwrites: [
+          { id: guild.id, type: OverwriteType.Role, deny: [PermissionFlagsBits.ViewChannel] },
+          { id: targetMember.id, type: OverwriteType.Member, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+          { id: senderMember.id, type: OverwriteType.Member, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+        ],
+      });
+
       offer.status = 'accepted';
       await offer.save();
 
-      // Benachrichtigung für den Sender
-      await Offer.create({
-        guildId: offer.guildId,
-        senderId: offer.targetId,
-        targetId: offer.senderId,
-        type: 'notification',
-        description: `✅ <@${offer.targetId}> hat dein Angebot für **${formatCoins(offer.price)}** angenommen.`,
-        price: offer.price,
+      const ticketEmbed = createEmbed({
+        title: `📋 Auftrag: ${(offer.description || '').slice(0, 50)}`,
+        description: offer.description || 'Kein Beschreibung',
+        color: COLORS.MARKET,
+        fields: [
+          { name: 'Auftraggeber', value: `<@${offer.senderId}>`, inline: true },
+          { name: 'Auftragnehmer', value: `<@${offer.targetId}>`, inline: true },
+          { name: 'Preis', value: formatCoins(offer.price || 0), inline: true },
+        ],
+        footer: 'Der Auftraggeber kann den Auftrag als abgeschlossen markieren oder stornieren.',
       });
 
-      const embed = createEmbed({
-        title: '✅ Angebot angenommen!',
+      const cancelFee = Math.ceil((offer.price || 0) / 2);
+      const ticketButtons = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`offer_complete_${offer._id}_${channel.id}`)
+          .setLabel('Abgeschlossen')
+          .setEmoji('✅')
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId(`offer_cancel_${offer._id}_${channel.id}`)
+          .setLabel(`Stornieren (${formatCoins(cancelFee)})`)
+          .setEmoji('❌')
+          .setStyle(ButtonStyle.Danger),
+      );
+
+      await channel.send({ content: `<@${offer.senderId}> <@${offer.targetId}>`, embeds: [ticketEmbed], components: [ticketButtons] });
+
+      const confirmEmbed = createEmbed({
+        title: '✅ Auftrag angenommen!',
         color: COLORS.SUCCESS,
-        description: `Du hast **${formatCoins(offer.price)}** an <@${offer.senderId}> bezahlt.`,
+        description: `Ticket erstellt: <#${channel.id}>`,
       });
-      return interaction.update({ embeds: [embed], components: [] });
+      return interaction.update({ embeds: [confirmEmbed], components: [] });
     } catch (err) {
       return interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
     }
@@ -649,7 +795,9 @@ async function handleButton(interaction) {
 
   // Direct offer/role deny
   if (id.startsWith('trade_deny_direct_')) {
+    const coinService = require('../services/coinService');
     const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const { formatCoins } = require('../utils/formatters');
     const Offer = require('../models/Offer');
     const offerId = id.replace('trade_deny_direct_', '');
     const offer = await Offer.findById(offerId);
@@ -661,12 +809,19 @@ async function handleButton(interaction) {
       return interaction.reply({ content: '❌ Dieses Angebot ist nicht für dich.', ephemeral: true });
     }
 
+    // Bei Coins-Typ: reservierte Coins zurück an den Sender
+    if (offer.type === 'coins') {
+      await coinService.addCoins(interaction.guild.id, offer.senderId, offer.price, 'trade', `Coins-Überweisung abgelehnt von <@${offer.targetId}>`);
+    }
+
     offer.status = 'denied';
     await offer.save();
 
     // Benachrichtigung für den Sender
     let notifDesc;
-    if (offer.type === 'role') {
+    if (offer.type === 'coins') {
+      notifDesc = `❌ <@${offer.targetId}> hat deine Überweisung von **${formatCoins(offer.price)}** abgelehnt. Die Coins wurden zurückerstattet.`;
+    } else if (offer.type === 'role') {
       notifDesc = `❌ <@${offer.targetId}> hat dein Rollenangebot **${offer.roleName}** abgelehnt.`;
     } else if (offer.type === 'service') {
       notifDesc = `❌ <@${offer.targetId}> hat deine Anfrage für **${offer.serviceName}** abgelehnt.`;
@@ -682,9 +837,11 @@ async function handleButton(interaction) {
     });
 
     const embed = createEmbed({
-      title: '❌ Angebot abgelehnt',
+      title: '❌ Abgelehnt',
       color: COLORS.ERROR,
-      description: `Du hast das Angebot von <@${offer.senderId}> abgelehnt.`,
+      description: offer.type === 'coins'
+        ? `Du hast die Überweisung von **${formatCoins(offer.price)}** von <@${offer.senderId}> abgelehnt.`
+        : `Du hast das Angebot von <@${offer.senderId}> abgelehnt.`,
     });
     return interaction.update({ embeds: [embed], components: [] });
   }
@@ -725,6 +882,14 @@ async function handleButton(interaction) {
             .setPlaceholder('z.B. 100')
             .setStyle(TextInputStyle.Short)
             .setRequired(true)
+        ),
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId('message')
+            .setLabel('Nachricht (optional)')
+            .setPlaceholder('z.B. Danke für die Hilfe!')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(false)
         ),
       );
       return interaction.showModal(modal);
@@ -814,15 +979,16 @@ async function handleButton(interaction) {
         return `**${i + 1}.** 🔔 ${o.description}`;
       }
       if (o.type === 'role') {
-        return `**${i + 1}.** 🏷️ Rolle: **${o.roleName}**\n> Von: <@${o.senderId}> • Preis: ${formatCoins(o.price)}`;
+        return `**${i + 1}.** 🏷️ Rolle: **${o.roleName}**\n> Von: <@${o.senderId}> • Preis: ${formatCoins(o.price || 0)}`;
       }
       if (o.type === 'service') {
-        return `**${i + 1}.** 🔧 Service-Anfrage: **${o.serviceName}**\n> Von: <@${o.senderId}> • ${formatCoins(o.price)}\n> ${(o.description || '').slice(0, 80)}`;
+        return `**${i + 1}.** 🔧 Service-Anfrage: **${o.serviceName}**\n> Von: <@${o.senderId}> • ${formatCoins(o.price || 0)}\n> ${(o.description || '').slice(0, 80)}`;
       }
       if (o.type === 'offer') {
-        return `**${i + 1}.** 📋 Angebot von <@${o.senderId}>\n> ${o.description}\n> Preis: ${formatCoins(o.price)}`;
+        return `**${i + 1}.** 📋 Angebot von <@${o.senderId}>\n> ${o.description}\n> Preis: ${formatCoins(o.price || 0)}`;
       }
-      return `**${i + 1}.** 💰 ${formatCoins(o.price)} von <@${o.senderId}>`;
+      const msg = o.description ? `\n> 💬 "${o.description}"` : '';
+      return `**${i + 1}.** 💰 ${formatCoins(o.price || 0)} von <@${o.senderId}>${msg}`;
     });
 
     // Benachrichtigungen automatisch als gelesen markieren
@@ -850,21 +1016,21 @@ async function handleButton(interaction) {
       .setCustomId('shop_offer_view')
       .setPlaceholder('Angebot einsehen...')
       .addOptions(actionableOffers.map((o) => {
-        let label, description;
+        let label, desc;
         if (o.type === 'role') {
-          label = `🏷️ Rolle: ${o.roleName}`;
-          description = `${formatCoins(o.price)}`;
+          label = `🏷️ Rolle: ${o.roleName || 'Unbekannt'}`;
+          desc = formatCoins(o.price || 0);
         } else if (o.type === 'service') {
           label = `🔧 ${o.serviceName || 'Service'}`;
-          description = `${formatCoins(o.price)} • ${(o.description || '').slice(0, 30)}`;
+          desc = `${formatCoins(o.price || 0)} • ${(o.description || '').slice(0, 30) || 'Anfrage'}`;
         } else if (o.type === 'offer') {
-          label = `📋 ${(o.description || '').slice(0, 40)}`;
-          description = `${formatCoins(o.price)}`;
+          label = `📋 ${(o.description || 'Angebot').slice(0, 40)}`;
+          desc = formatCoins(o.price || 0);
         } else {
-          label = `💰 ${formatCoins(o.price)}`;
-          description = 'Coins-Überweisung';
+          label = `💰 ${formatCoins(o.price || 0)}`;
+          desc = 'Coins-Überweisung';
         }
-        return { label: label.slice(0, 100), description, value: o._id.toString() };
+        return { label: label.slice(0, 100), description: desc.slice(0, 100), value: o._id.toString() };
       }));
 
     const components = [new ActionRowBuilder().addComponents(selectMenu)];
@@ -884,7 +1050,7 @@ async function handleButton(interaction) {
       return interaction.reply({ content: '❌ Dieses Angebot ist nicht mehr gültig.', ephemeral: true });
     }
 
-    const fields = [{ name: 'Preis', value: formatCoins(offer.price), inline: true }];
+    const fields = [{ name: 'Betrag', value: formatCoins(offer.price || 0), inline: true }];
     let title;
     if (offer.type === 'role') {
       title = '🏷️ Rollenangebot';
@@ -896,8 +1062,13 @@ async function handleButton(interaction) {
     } else if (offer.type === 'offer') {
       title = '📋 Angebot';
       fields.unshift({ name: 'Beschreibung', value: offer.description });
+    } else if (offer.type === 'coins') {
+      title = '💰 Coins-Überweisung';
+      if (offer.description) {
+        fields.push({ name: 'Nachricht', value: offer.description });
+      }
     } else {
-      title = '💰 Coins-Angebot';
+      title = '💰 Angebot';
     }
 
     const embed = createEmbed({
@@ -928,6 +1099,166 @@ async function handleButton(interaction) {
     return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
   }
 
+  // Role buy confirmation
+  if (id.startsWith('role_confirm_buy_')) {
+    const marketService = require('../services/marketService');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const { formatCoins } = require('../utils/formatters');
+    const roleName = id.replace('role_confirm_buy_', '');
+
+    try {
+      const { marketRole, price, roleError } = await marketService.buyRole(
+        interaction.guild.id,
+        interaction.user.id,
+        roleName,
+        interaction.guild
+      );
+      const fields = [
+        { name: 'Rolle', value: marketRole.name, inline: true },
+        { name: 'Preis', value: formatCoins(price), inline: true },
+        { name: 'Verbleibend', value: `${marketRole.totalStock - marketRole.purchased}`, inline: true },
+      ];
+      if (roleError) {
+        fields.push({ name: '⚠️ Hinweis', value: `Rolle konnte nicht zugewiesen werden: ${roleError}` });
+      }
+      const embed = createEmbed({
+        title: roleError ? '⚠️ Rolle gekauft, aber nicht zugewiesen!' : '🎉 Rolle gekauft!',
+        color: roleError ? COLORS.WARNING : COLORS.SUCCESS,
+        fields,
+      });
+      return interaction.update({ embeds: [embed], components: [] });
+    } catch (err) {
+      return interaction.update({ content: `❌ ${err.message}`, embeds: [], components: [] });
+    }
+  }
+
+  // Role buy cancel
+  if (id === 'role_cancel_buy') {
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const embed = createEmbed({
+      title: '❌ Kauf abgebrochen',
+      description: 'Du hast den Kauf abgebrochen.',
+      color: COLORS.ERROR,
+    });
+    return interaction.update({ embeds: [embed], components: [] });
+  }
+
+  // Quest claim confirmation
+  if (id.startsWith('quest_confirm_claim_')) {
+    const questService = require('../services/questService');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const { formatCoins } = require('../utils/formatters');
+    const questId = id.replace('quest_confirm_claim_', '');
+
+    try {
+      const { quest, channelId } = await questService.claimQuest(
+        interaction.guild.id,
+        questId,
+        interaction.user.id,
+        interaction.guild
+      );
+      const embed = createEmbed({
+        title: '📋 Quest angenommen!',
+        color: COLORS.SUCCESS,
+        fields: [
+          { name: 'Quest', value: quest.title, inline: true },
+          { name: 'Belohnung', value: formatCoins(quest.reward), inline: true },
+        ],
+        description: channelId
+          ? `Ein Ticket-Channel wurde erstellt: <#${channelId}>`
+          : 'Viel Erfolg!',
+      });
+      return interaction.update({ embeds: [embed], components: [] });
+    } catch (err) {
+      return interaction.update({ content: `❌ ${err.message}`, embeds: [], components: [] });
+    }
+  }
+
+  // Quest claim cancel
+  if (id === 'quest_cancel_claim') {
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const embed = createEmbed({
+      title: '❌ Abgebrochen',
+      description: 'Du hast die Quest nicht angenommen.',
+      color: COLORS.ERROR,
+    });
+    return interaction.update({ embeds: [embed], components: [] });
+  }
+
+  // Job apply confirmation — Ticket erstellen
+  if (id.startsWith('job_confirm_apply_')) {
+    const JobListing = require('../models/JobListing');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const { formatCoins } = require('../utils/formatters');
+    const { ChannelType, PermissionFlagsBits, OverwriteType, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+    const jobId = id.replace('job_confirm_apply_', '');
+
+    const listing = await JobListing.findById(jobId).lean();
+    if (!listing || !listing.isOpen) {
+      return interaction.update({ content: '❌ Diese Stelle ist nicht mehr verfügbar.', embeds: [], components: [] });
+    }
+
+    const guild = interaction.guild;
+    const applicant = await guild.members.fetch(interaction.user.id);
+    const applicantName = applicant.displayName.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20);
+    const jobName = listing.title.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20);
+
+    const channel = await guild.channels.create({
+      name: `job-${jobName}-${applicantName}`,
+      type: ChannelType.GuildText,
+      permissionOverwrites: [
+        { id: guild.id, type: OverwriteType.Role, deny: [PermissionFlagsBits.ViewChannel] },
+        { id: applicant.id, type: OverwriteType.Member, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+      ],
+    });
+
+    const roleDisplay = listing.roleId ? `<@&${listing.roleId}>` : 'Keine';
+    const ticketEmbed = createEmbed({
+      title: `💼 Bewerbung: ${listing.title}`,
+      description: listing.description,
+      color: COLORS.JOB,
+      fields: [
+        { name: 'Bewerber', value: `<@${interaction.user.id}>`, inline: true },
+        { name: 'Gehalt', value: `${formatCoins(listing.salary || 0)}/Woche`, inline: true },
+        { name: 'Rolle', value: roleDisplay, inline: true },
+      ],
+      footer: 'Ein Admin kann diese Bewerbung annehmen oder ablehnen.',
+    });
+
+    const ticketButtons = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`job_accept_${listing._id}_${interaction.user.id}_${channel.id}`)
+        .setLabel('Annehmen')
+        .setEmoji('✅')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`job_deny_${listing._id}_${interaction.user.id}_${channel.id}`)
+        .setLabel('Ablehnen')
+        .setEmoji('❌')
+        .setStyle(ButtonStyle.Danger),
+    );
+
+    await channel.send({ content: `<@${interaction.user.id}>`, embeds: [ticketEmbed], components: [ticketButtons] });
+
+    const confirmEmbed = createEmbed({
+      title: '✅ Bewerbung erstellt!',
+      description: `Deine Bewerbung für **${listing.title}** wurde erstellt: <#${channel.id}>`,
+      color: COLORS.SUCCESS,
+    });
+    return interaction.update({ embeds: [confirmEmbed], components: [] });
+  }
+
+  // Job apply cancel
+  if (id === 'job_cancel_apply') {
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const embed = createEmbed({
+      title: '❌ Abgebrochen',
+      description: 'Du hast dich nicht beworben.',
+      color: COLORS.ERROR,
+    });
+    return interaction.update({ embeds: [embed], components: [] });
+  }
+
   // Shop category navigation
   if (id.startsWith('shop_cat_')) {
     const { buildShopResponse } = require('../services/shopService');
@@ -952,37 +1283,46 @@ async function handleButton(interaction) {
 async function handleSelectMenu(interaction) {
   const id = interaction.customId;
 
-  // Buy role from shop
+  // Buy role from shop — Bestätigung anzeigen
   if (id.startsWith('shop_buy_role_')) {
-    const marketService = require('../services/marketService');
+    const MarketRole = require('../models/MarketRole');
     const { createEmbed, COLORS } = require('../utils/embedBuilder');
     const { formatCoins } = require('../utils/formatters');
+    const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
     const roleName = interaction.values[0];
 
-    try {
-      const { marketRole, price, roleError } = await marketService.buyRole(
-        interaction.guild.id,
-        interaction.user.id,
-        roleName,
-        interaction.guild
-      );
-      const fields = [
-        { name: 'Rolle', value: marketRole.name, inline: true },
-        { name: 'Preis', value: formatCoins(price), inline: true },
-        { name: 'Verbleibend', value: `${marketRole.totalStock - marketRole.purchased}`, inline: true },
-      ];
-      if (roleError) {
-        fields.push({ name: '⚠️ Hinweis', value: `Rolle konnte nicht zugewiesen werden: ${roleError}` });
-      }
-      const embed = createEmbed({
-        title: roleError ? '⚠️ Rolle gekauft, aber nicht zugewiesen!' : '🎉 Rolle gekauft!',
-        color: roleError ? COLORS.WARNING : COLORS.SUCCESS,
-        fields,
-      });
-      await interaction.reply({ embeds: [embed], ephemeral: true });
-    } catch (err) {
-      await interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
+    const role = await MarketRole.findOne({ guildId: interaction.guild.id, name: { $regex: new RegExp(`^${roleName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } }).lean();
+    if (!role) {
+      return interaction.reply({ content: '❌ Diese Rolle existiert nicht mehr.', ephemeral: true });
     }
+
+    const stock = role.totalStock - role.purchased;
+    if (stock <= 0) {
+      return interaction.reply({ content: '❌ Diese Rolle ist ausverkauft.', ephemeral: true });
+    }
+
+    const price = role.isPrestige ? 6000 : role.price;
+    const roleDisplay = role.roleId ? `<@&${role.roleId}>` : role.name;
+    const embed = createEmbed({
+      title: '🏷️ Rolle kaufen?',
+      description: `Möchtest du diese Rolle wirklich kaufen?\n\n> ${roleDisplay}\n> 💰 Preis: **${formatCoins(price)}**\n> Verfügbar: ${stock}/${role.totalStock}`,
+      color: COLORS.MARKET,
+    });
+
+    const buttons = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`role_confirm_buy_${roleName}`)
+        .setLabel(`Kaufen (${formatCoins(price)})`)
+        .setEmoji('✅')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId('role_cancel_buy')
+        .setLabel('Abbrechen')
+        .setEmoji('❌')
+        .setStyle(ButtonStyle.Secondary),
+    );
+
+    await interaction.reply({ embeds: [embed], components: [buttons], ephemeral: true });
     return;
   }
 
@@ -1046,44 +1386,49 @@ async function handleSelectMenu(interaction) {
     return interaction.showModal(modal);
   }
 
-  // Claim quest
+  // Claim quest — Bestätigung anzeigen
   if (id.startsWith('shop_quest_claim_')) {
-    const questService = require('../services/questService');
+    const Quest = require('../models/Quest');
     const { createEmbed, COLORS } = require('../utils/embedBuilder');
     const { formatCoins } = require('../utils/formatters');
+    const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
     const questId = interaction.values[0];
 
-    try {
-      const { quest, channelId } = await questService.claimQuest(
-        interaction.guild.id,
-        questId,
-        interaction.user.id,
-        interaction.guild
-      );
-      const embed = createEmbed({
-        title: '📋 Quest angenommen!',
-        color: COLORS.SUCCESS,
-        fields: [
-          { name: 'Quest', value: quest.title, inline: true },
-          { name: 'Belohnung', value: formatCoins(quest.reward), inline: true },
-        ],
-        description: channelId
-          ? `Ein Ticket-Channel wurde erstellt: <#${channelId}>`
-          : 'Viel Erfolg!',
-      });
-      await interaction.reply({ embeds: [embed], ephemeral: true });
-    } catch (err) {
-      await interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
+    const quest = await Quest.findOne({ _id: questId, guildId: interaction.guild.id, status: 'open' }).lean();
+    if (!quest) {
+      return interaction.reply({ content: '❌ Diese Quest ist nicht mehr verfügbar.', ephemeral: true });
     }
+
+    const participants = quest.participants ? quest.participants.length : 0;
+    const embed = createEmbed({
+      title: '📋 Quest annehmen?',
+      description: `Möchtest du diese Quest wirklich annehmen?\n\n> **${quest.title}**\n> ${quest.description}\n> 🏆 Belohnung: **${formatCoins(quest.reward)}**\n> 👥 ${participants} Teilnehmer`,
+      color: COLORS.MARKET,
+    });
+
+    const buttons = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`quest_confirm_claim_${questId}`)
+        .setLabel('Quest annehmen')
+        .setEmoji('✅')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId('quest_cancel_claim')
+        .setLabel('Abbrechen')
+        .setEmoji('❌')
+        .setStyle(ButtonStyle.Secondary),
+    );
+
+    await interaction.reply({ embeds: [embed], components: [buttons], ephemeral: true });
     return;
   }
 
-  // Apply for job — Ticket erstellen
+  // Apply for job — Bestätigung anzeigen
   if (id.startsWith('shop_apply_job_')) {
     const JobListing = require('../models/JobListing');
     const { createEmbed, COLORS } = require('../utils/embedBuilder');
     const { formatCoins } = require('../utils/formatters');
-    const { ChannelType, PermissionFlagsBits, OverwriteType, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+    const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
     const jobId = interaction.values[0];
 
     const listing = await JobListing.findById(jobId).lean();
@@ -1091,51 +1436,27 @@ async function handleSelectMenu(interaction) {
       return interaction.reply({ content: '❌ Diese Stelle ist nicht mehr verfügbar.', ephemeral: true });
     }
 
-    const guild = interaction.guild;
-    const applicant = await guild.members.fetch(interaction.user.id);
-    const applicantName = applicant.displayName.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20);
-    const jobName = listing.title.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20);
-
-    const channel = await guild.channels.create({
-      name: `job-${jobName}-${applicantName}`,
-      type: ChannelType.GuildText,
-      permissionOverwrites: [
-        { id: guild.id, type: OverwriteType.Role, deny: [PermissionFlagsBits.ViewChannel] },
-        { id: applicant.id, type: OverwriteType.Member, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
-      ],
-    });
-
     const roleDisplay = listing.roleId ? `<@&${listing.roleId}>` : 'Keine';
     const embed = createEmbed({
-      title: `💼 Bewerbung: ${listing.title}`,
-      description: listing.description,
+      title: '💼 Bewerben?',
+      description: `Möchtest du dich wirklich bewerben?\n\n> **${listing.title}**\n> ${listing.description}\n> 💰 Gehalt: **${formatCoins(listing.salary || 0)}/Woche**\n> Rolle: ${roleDisplay}`,
       color: COLORS.JOB,
-      fields: [
-        { name: 'Bewerber', value: `<@${interaction.user.id}>`, inline: true },
-        { name: 'Gehalt', value: `${formatCoins(listing.salary || 0)}/Woche`, inline: true },
-        { name: 'Rolle', value: roleDisplay, inline: true },
-      ],
-      footer: 'Ein Admin kann diese Bewerbung annehmen oder ablehnen.',
     });
 
     const buttons = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId(`job_accept_${listing._id}_${interaction.user.id}_${channel.id}`)
-        .setLabel('Annehmen')
+        .setCustomId(`job_confirm_apply_${jobId}`)
+        .setLabel('Bewerben')
         .setEmoji('✅')
         .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
-        .setCustomId(`job_deny_${listing._id}_${interaction.user.id}_${channel.id}`)
-        .setLabel('Ablehnen')
+        .setCustomId('job_cancel_apply')
+        .setLabel('Abbrechen')
         .setEmoji('❌')
-        .setStyle(ButtonStyle.Danger),
+        .setStyle(ButtonStyle.Secondary),
     );
 
-    await channel.send({ content: `<@${interaction.user.id}>`, embeds: [embed], components: [buttons] });
-    await interaction.reply({
-      content: `✅ Bewerbung für **${listing.title}** erstellt: <#${channel.id}>`,
-      ephemeral: true,
-    });
+    await interaction.reply({ embeds: [embed], components: [buttons], ephemeral: true });
     return;
   }
 
@@ -1152,7 +1473,7 @@ async function handleSelectMenu(interaction) {
       return interaction.reply({ content: '❌ Dieses Angebot ist nicht mehr gültig.', ephemeral: true });
     }
 
-    const fields = [{ name: 'Preis', value: formatCoins(offer.price), inline: true }];
+    const fields = [{ name: 'Betrag', value: formatCoins(offer.price || 0), inline: true }];
     let title;
     if (offer.type === 'role') {
       title = '🏷️ Rollenangebot';
@@ -1164,8 +1485,13 @@ async function handleSelectMenu(interaction) {
     } else if (offer.type === 'offer') {
       title = '📋 Angebot';
       fields.unshift({ name: 'Beschreibung', value: offer.description });
+    } else if (offer.type === 'coins') {
+      title = '💰 Coins-Überweisung';
+      if (offer.description) {
+        fields.push({ name: 'Nachricht', value: offer.description });
+      }
     } else {
-      title = '💰 Coins-Angebot';
+      title = '💰 Angebot';
     }
 
     const embed = createEmbed({
@@ -1300,15 +1626,23 @@ async function handleModal(interaction) {
         statusLine = `💰 **${formatCoins(cost)}** eingezahlt!`;
       }
 
+      const Offer = require('../models/Offer');
+      const pendingCount = await Offer.countDocuments({ guildId: interaction.guild.id, targetId: interaction.user.id, status: 'pending' });
+
+      const fields = [
+        { name: 'Rang', value: user.level > 0 ? currentRank : 'Kein Rang', inline: true },
+        { name: 'Nächster Rang', value: isMaxLevel ? 'Max erreicht' : `${nextRank} — ${formatCoins(user.levelProgress || 0)}/${formatCoins(nextLevelCost)}`, inline: true },
+      ];
+      if (pendingCount > 0) {
+        fields.push({ name: '📬 Postfach', value: `**${pendingCount}** neue Meldung${pendingCount > 1 ? 'en' : ''}`, inline: true });
+      }
+
       const embed = createEmbed({
         title: '💰 Dein Kontostand',
         description: `${statusLine}\n\nDu hast **${formatCoins(user.coins)}**`,
         color: COLORS.GOLD,
         thumbnail: interaction.user.displayAvatarURL(),
-        fields: [
-          { name: 'Rang', value: user.level > 0 ? currentRank : 'Kein Rang', inline: true },
-          { name: 'Nächster Rang', value: isMaxLevel ? 'Max erreicht' : `${nextRank} — ${formatCoins(user.levelProgress || 0)}/${formatCoins(nextLevelCost)}`, inline: true },
-        ],
+        fields,
       });
 
       const buttons = [];
@@ -1329,7 +1663,7 @@ async function handleModal(interaction) {
           .setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
           .setCustomId('shop_offers')
-          .setLabel('Postfach')
+          .setLabel(pendingCount > 0 ? `Postfach (${pendingCount})` : 'Postfach')
           .setEmoji('📬')
           .setStyle(ButtonStyle.Secondary),
       );
@@ -1341,31 +1675,43 @@ async function handleModal(interaction) {
     }
   }
 
-  // Coins senden
+  // Coins senden — Angebot erstellen
   if (id.startsWith('modal_send_coins_')) {
     const coinService = require('../services/coinService');
+    const Offer = require('../models/Offer');
     const { createEmbed, COLORS } = require('../utils/embedBuilder');
     const { formatCoins } = require('../utils/formatters');
     const targetId = id.replace('modal_send_coins_', '');
     const amount = parseInt(interaction.fields.getTextInputValue('amount'));
+    const message = interaction.fields.getTextInputValue('message') || '';
 
     if (isNaN(amount) || amount <= 0) {
       return interaction.reply({ content: '❌ Bitte gib einen gültigen Betrag ein.', ephemeral: true });
     }
 
-    await coinService.transfer(
-      interaction.guild.id,
-      interaction.user.id,
-      targetId,
-      amount,
-      'trade',
-      `Coins gesendet an <@${targetId}>`
-    );
+    // Prüfen ob der Sender genug Coins hat
+    const sender = await coinService.getBalance(interaction.guild.id, interaction.user.id);
+    if (sender < amount) {
+      return interaction.reply({ content: `❌ Du hast nicht genug Coins. Dein Guthaben: ${formatCoins(sender)}`, ephemeral: true });
+    }
 
+    // Coins vom Sender abziehen (reservieren)
+    await coinService.addCoins(interaction.guild.id, interaction.user.id, -amount, 'trade', `Coins reserviert für <@${targetId}>`);
+
+    await Offer.create({
+      guildId: interaction.guild.id,
+      senderId: interaction.user.id,
+      targetId,
+      type: 'coins',
+      price: amount,
+      description: message || null,
+    });
+
+    const msgInfo = message ? `\n> 💬 "${message}"` : '';
     const embed = createEmbed({
-      title: '✅ Coins gesendet!',
+      title: '✅ Coins-Überweisung erstellt!',
       color: COLORS.SUCCESS,
-      description: `Du hast **${formatCoins(amount)}** an <@${targetId}> gesendet.`,
+      description: `**${formatCoins(amount)}** wurden für <@${targetId}> reserviert.${msgInfo}\n\nDer Empfänger muss die Überweisung im Postfach akzeptieren.`,
     });
     return interaction.reply({ embeds: [embed], ephemeral: true });
   }
