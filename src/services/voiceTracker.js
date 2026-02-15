@@ -53,7 +53,8 @@ async function tickVoiceXp(client) {
 
     for (const user of eligible) {
       try {
-        await xpService.addCoins(user.guildId, user.userId, COINS.PER_VOICE_MINUTE, 'voice');
+        const amount = Math.floor(Math.random() * (COINS.PER_VOICE_MAX - COINS.PER_VOICE_MIN + 1)) + COINS.PER_VOICE_MIN;
+        await xpService.addCoins(user.guildId, user.userId, amount, 'voice');
       } catch (err) {
         logger.error(`Voice-Coins Fehler für ${user.userId}:`, err);
       }

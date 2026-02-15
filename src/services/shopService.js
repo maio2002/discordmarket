@@ -62,18 +62,27 @@ async function renderRolesPage(guildId, page = 1) {
     return { embed, components: [buildCategoryRow('roles')], totalPages: 1 };
   }
 
-  const lines = roles.map((r, i) => {
+  const fields = [];
+  for (const r of roles) {
     const stock = r.totalStock - r.purchased;
     const tag = r.isPrestige ? ' ⭐' : '';
     const status = stock > 0 ? `${stock}/${r.totalStock}` : '❌ Ausverkauft';
     const roleDisplay = r.roleId ? `<@&${r.roleId}>` : r.name;
-    return `**${i + 1}.** ${roleDisplay}${tag}\n> 💰 ${formatCoins(r.price)} • Verfügbar: ${status}`;
-  });
+    fields.push({
+      name: `${r.name}${tag}`,
+      value: `${roleDisplay}\n💰 ${formatCoins(r.price)}\nVerfügbar: ${status}`,
+      inline: true,
+    });
+  }
+  // Leeres Feld nach ungerader Anzahl für sauberes 2-Spalten-Layout
+  if (fields.length % 2 !== 0) {
+    fields.push({ name: '\u200b', value: '\u200b', inline: true });
+  }
 
   const embed = createEmbed({
     title: '🏷️ Rollen-Shop',
-    description: lines.join('\n\n'),
     color: COLORS.MARKET,
+    fields,
     footer: `Seite ${page}/${totalPages} • Wähle eine Rolle zum Kaufen`,
   });
 

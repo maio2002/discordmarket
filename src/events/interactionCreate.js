@@ -243,7 +243,7 @@ async function handleButton(interaction) {
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId('shop_offers')
-        .setLabel('Meldungen')
+        .setLabel('Postfach')
         .setEmoji('📬')
         .setStyle(ButtonStyle.Secondary),
     );
@@ -562,7 +562,7 @@ async function handleButton(interaction) {
 
     if (offers.length === 0) {
       const embed = createEmbed({
-        title: '📬 Deine Angebote',
+        title: '📬 Dein Postfach',
         description: 'Du hast keine offenen Angebote.',
         color: COLORS.MARKET,
       });
@@ -594,7 +594,7 @@ async function handleButton(interaction) {
     const actionableOffers = offers.filter(o => o.type !== 'notification');
 
     const embed = createEmbed({
-      title: '📬 Deine Angebote',
+      title: '📬 Dein Postfach',
       description: lines.join('\n\n'),
       color: COLORS.MARKET,
       footer: actionableOffers.length > 0
@@ -1048,7 +1048,7 @@ async function handleModal(interaction) {
           .setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
           .setCustomId('shop_offers')
-          .setLabel('Meldungen')
+          .setLabel('Postfach')
           .setEmoji('📬')
           .setStyle(ButtonStyle.Secondary),
       );
@@ -1118,7 +1118,7 @@ async function handleModal(interaction) {
     });
 
     return interaction.reply({
-      content: `✅ Rollenangebot für **${role.name}** an <@${targetId}> gesendet! Der User kann es unter 📬 Angebote einsehen.`,
+      content: `✅ Rollenangebot für **${role.name}** an <@${targetId}> gesendet! Der User kann es unter 📬 Postfach einsehen.`,
       ephemeral: true,
     });
   }
@@ -1144,7 +1144,7 @@ async function handleModal(interaction) {
     });
 
     return interaction.reply({
-      content: `✅ Angebot an <@${targetId}> gesendet! Der User kann es unter 📬 Angebote einsehen.`,
+      content: `✅ Angebot an <@${targetId}> gesendet! Der User kann es unter 📬 Postfach einsehen.`,
       ephemeral: true,
     });
   }
@@ -1173,7 +1173,7 @@ async function handleModal(interaction) {
     });
 
     return interaction.reply({
-      content: `✅ Anfrage für **${service.name}** (${formatCoins(service.price)}) an <@${service.providerId}> gesendet! Der Dienstleister erhält die Anfrage in seinen Meldungen.`,
+      content: `✅ Anfrage für **${service.name}** (${formatCoins(service.price)}) an <@${service.providerId}> gesendet! Der Dienstleister erhält die Anfrage in seinem Postfach.`,
       ephemeral: true,
     });
   }

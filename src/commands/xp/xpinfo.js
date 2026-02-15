@@ -18,12 +18,12 @@ module.exports = {
       fields: [
         {
           name: '💬 Nachrichten',
-          value: `**${COINS.PER_MESSAGE} Coins** pro Nachricht\nCooldown: ${COINS.MESSAGE_COOLDOWN_MS / 1000} Sekunden`,
+          value: `**${COINS.PER_MESSAGE_MIN}-${COINS.PER_MESSAGE_MAX} Coins** pro Nachricht\nCooldown: ${COINS.MESSAGE_COOLDOWN_MS / 1000} Sekunden`,
           inline: true,
         },
         {
           name: '🔊 Voice-Chat',
-          value: `**${COINS.PER_VOICE_MINUTE} Coins** pro Minute\nMind. ${COINS.VOICE_MIN_USERS + 1} Nutzer im Channel\nDarf nicht gemutet sein`,
+          value: `**${COINS.PER_VOICE_MIN}-${COINS.PER_VOICE_MAX} Coins** pro Minute\nMind. ${COINS.VOICE_MIN_USERS + 1} Nutzer im Channel\nDarf nicht gemutet sein`,
           inline: true,
         },
         {

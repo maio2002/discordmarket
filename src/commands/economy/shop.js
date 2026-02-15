@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { createEmbed, COLORS } = require('../../utils/embedBuilder');
-const { COINS, LEVEL, WEEKLY_BONUSES } = require('../../constants');
+const { COINS, LEVEL } = require('../../constants');
 const { formatCoins } = require('../../utils/formatters');
 
 module.exports = {
@@ -13,7 +13,7 @@ module.exports = {
     ).join('\n');
 
     const embed = createEmbed({
-      title: '🛒 Shop & Rang-System',
+      title: 'Shop & Rang-System',
       color: COLORS.MARKET,
       fields: [
         {
@@ -22,17 +22,16 @@ module.exports = {
         },
         {
           name: '💰 Kontostand',
-          value: `Zeigt deinen aktuellen Rang, Coins und Fortschritt an.\nVon dort aus kannst du Coins einzahlen, senden oder deine Meldungen einsehen.`,
+          value: `Zeigt deinen aktuellen Rang, Coins und Fortschritt an.\nVon dort aus kannst du Coins einzahlen, senden oder dein Postfach einsehen.`,
         },
         {
           name: '💬 Coins verdienen',
-          value: `**${COINS.PER_MESSAGE} Coins** pro Nachricht (${COINS.MESSAGE_COOLDOWN_MS / 1000}s Cooldown)\n**${COINS.PER_VOICE_MINUTE} Coins** pro Minute Voice-Chat`,
-          inline: true,
-        },
-        {
-          name: '🎁 Wöchentliche Boni',
-          value: `Member: **${formatCoins(WEEKLY_BONUSES.MEMBER)}**/Woche\nVIP: **${formatCoins(WEEKLY_BONUSES.VIP)}**/Woche`,
-          inline: true,
+          value: [
+            `**Jobs** — Gehalt durch Arbeitsstellen`,
+            `**Quests** — Belohnungen für abgeschlossene Aufgaben`,
+            `**Handel** — Coins durch Angebote und Dienstleistungen`,
+            `**Aktivität** — Coins durch Nachrichten oder Voice-Chat`,
+          ].join('\n'),
         },
         {
           name: '⬆️ Ränge',

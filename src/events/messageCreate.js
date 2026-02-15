@@ -19,6 +19,7 @@ module.exports = {
     user.lastMessageXp = new Date();
     await user.save();
 
-    await xpService.addCoins(guild.id, author.id, COINS.PER_MESSAGE, 'message');
+    const amount = Math.floor(Math.random() * (COINS.PER_MESSAGE_MAX - COINS.PER_MESSAGE_MIN + 1)) + COINS.PER_MESSAGE_MIN;
+    await xpService.addCoins(guild.id, author.id, amount, 'message');
   },
 };
