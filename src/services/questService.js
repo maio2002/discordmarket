@@ -75,7 +75,7 @@ async function claimQuest(guildId, questId, userId, guild) {
         .setStyle(ButtonStyle.Danger),
     );
 
-    await channel.send({ embeds: [embed], components: [buttons] });
+    await channel.send({ content: `<@${userId}>`, embeds: [embed], components: [buttons] });
   } catch (err) {
     logger.error(`Quest-Ticket konnte nicht erstellt werden: ${err.message}`);
   }

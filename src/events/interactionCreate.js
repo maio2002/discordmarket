@@ -194,6 +194,85 @@ async function handleButton(interaction) {
     }
   }
 
+  // Job ticket: Annehmen (Admin)
+  if (id.startsWith('job_accept_')) {
+    const JobListing = require('../models/JobListing');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const { formatCoins } = require('../utils/formatters');
+    const parts = id.split('_');
+    const jobId = parts[2];
+    const applicantId = parts[3];
+    const channelId = parts[4];
+
+    if (!interaction.member.permissions.has(require('discord.js').PermissionFlagsBits.Administrator)) {
+      return interaction.reply({ content: '❌ Nur Admins können Bewerbungen annehmen.', ephemeral: true });
+    }
+
+    const listing = await JobListing.findById(jobId).lean();
+    if (!listing) {
+      return interaction.reply({ content: '❌ Diese Stelle existiert nicht mehr.', ephemeral: true });
+    }
+
+    // Assign role
+    if (listing.roleId) {
+      try {
+        const member = await interaction.guild.members.fetch(applicantId);
+        await member.roles.add(listing.roleId);
+      } catch (err) {
+        const logger = require('../utils/logger');
+        logger.error(`Job-Rolle konnte nicht zugewiesen werden: ${err.message}`);
+      }
+    }
+
+    const roleInfo = listing.roleId ? ` und die Rolle <@&${listing.roleId}> erhalten` : '';
+    const embed = createEmbed({
+      title: '✅ Bewerbung angenommen!',
+      color: COLORS.SUCCESS,
+      description: `<@${applicantId}> wurde für **${listing.title}** angenommen${roleInfo}.\n\nGehalt: ${formatCoins(listing.salary || 0)}/Woche\n\nDieser Channel wird in 10 Sekunden gelöscht.`,
+    });
+    await interaction.update({ embeds: [embed], components: [] });
+
+    setTimeout(async () => {
+      try {
+        const ch = await interaction.guild.channels.fetch(channelId);
+        if (ch) await ch.delete();
+      } catch {}
+    }, 10000);
+    return;
+  }
+
+  // Job ticket: Ablehnen (Admin)
+  if (id.startsWith('job_deny_')) {
+    const JobListing = require('../models/JobListing');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const parts = id.split('_');
+    const jobId = parts[2];
+    const applicantId = parts[3];
+    const channelId = parts[4];
+
+    if (!interaction.member.permissions.has(require('discord.js').PermissionFlagsBits.Administrator)) {
+      return interaction.reply({ content: '❌ Nur Admins können Bewerbungen ablehnen.', ephemeral: true });
+    }
+
+    const listing = await JobListing.findById(jobId).lean();
+    const title = listing ? listing.title : 'Unbekannte Stelle';
+
+    const embed = createEmbed({
+      title: '❌ Bewerbung abgelehnt',
+      color: COLORS.ERROR,
+      description: `Die Bewerbung von <@${applicantId}> für **${title}** wurde abgelehnt.\n\nDieser Channel wird in 10 Sekunden gelöscht.`,
+    });
+    await interaction.update({ embeds: [embed], components: [] });
+
+    setTimeout(async () => {
+      try {
+        const ch = await interaction.guild.channels.fetch(channelId);
+        if (ch) await ch.delete();
+      } catch {}
+    }, 10000);
+    return;
+  }
+
   // Service ticket: Annehmen (Anbieter)
   if (id.startsWith('service_accept_')) {
     const Service = require('../models/Service');
@@ -999,10 +1078,12 @@ async function handleSelectMenu(interaction) {
     return;
   }
 
-  // Apply for job
+  // Apply for job — Ticket erstellen
   if (id.startsWith('shop_apply_job_')) {
     const JobListing = require('../models/JobListing');
     const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const { formatCoins } = require('../utils/formatters');
+    const { ChannelType, PermissionFlagsBits, OverwriteType, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
     const jobId = interaction.values[0];
 
     const listing = await JobListing.findById(jobId).lean();
@@ -1010,25 +1091,51 @@ async function handleSelectMenu(interaction) {
       return interaction.reply({ content: '❌ Diese Stelle ist nicht mehr verfügbar.', ephemeral: true });
     }
 
-    // Assign the job role to the user
-    if (listing.roleId) {
-      try {
-        const member = await interaction.guild.members.fetch(interaction.user.id);
-        await member.roles.add(listing.roleId);
-      } catch (err) {
-        const logger = require('../utils/logger');
-        logger.error(`Job-Rolle konnte nicht zugewiesen werden: ${err.message}`);
-        return interaction.reply({ content: '❌ Die Job-Rolle konnte nicht zugewiesen werden. Kontaktiere einen Admin.', ephemeral: true });
-      }
-    }
+    const guild = interaction.guild;
+    const applicant = await guild.members.fetch(interaction.user.id);
+    const applicantName = applicant.displayName.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20);
+    const jobName = listing.title.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20);
 
-    const roleInfo = listing.roleId ? `\nRolle erhalten: <@&${listing.roleId}>` : '';
-    const embed = createEmbed({
-      title: '💼 Job angenommen!',
-      color: COLORS.JOB,
-      description: `Stelle: **${listing.title}**${roleInfo}`,
+    const channel = await guild.channels.create({
+      name: `job-${jobName}-${applicantName}`,
+      type: ChannelType.GuildText,
+      permissionOverwrites: [
+        { id: guild.id, type: OverwriteType.Role, deny: [PermissionFlagsBits.ViewChannel] },
+        { id: applicant.id, type: OverwriteType.Member, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+      ],
     });
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+
+    const roleDisplay = listing.roleId ? `<@&${listing.roleId}>` : 'Keine';
+    const embed = createEmbed({
+      title: `💼 Bewerbung: ${listing.title}`,
+      description: listing.description,
+      color: COLORS.JOB,
+      fields: [
+        { name: 'Bewerber', value: `<@${interaction.user.id}>`, inline: true },
+        { name: 'Gehalt', value: `${formatCoins(listing.salary || 0)}/Woche`, inline: true },
+        { name: 'Rolle', value: roleDisplay, inline: true },
+      ],
+      footer: 'Ein Admin kann diese Bewerbung annehmen oder ablehnen.',
+    });
+
+    const buttons = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`job_accept_${listing._id}_${interaction.user.id}_${channel.id}`)
+        .setLabel('Annehmen')
+        .setEmoji('✅')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`job_deny_${listing._id}_${interaction.user.id}_${channel.id}`)
+        .setLabel('Ablehnen')
+        .setEmoji('❌')
+        .setStyle(ButtonStyle.Danger),
+    );
+
+    await channel.send({ content: `<@${interaction.user.id}>`, embeds: [embed], components: [buttons] });
+    await interaction.reply({
+      content: `✅ Bewerbung für **${listing.title}** erstellt: <#${channel.id}>`,
+      ephemeral: true,
+    });
     return;
   }
 
@@ -1378,7 +1485,7 @@ async function handleModal(interaction) {
         .setStyle(ButtonStyle.Danger),
     );
 
-    await channel.send({ embeds: [embed], components: [buttons] });
+    await channel.send({ content: `<@${interaction.user.id}> <@${service.providerId}>`, embeds: [embed], components: [buttons] });
 
     return interaction.reply({
       content: `✅ Ticket für **${service.name}** erstellt: <#${channel.id}>`,
