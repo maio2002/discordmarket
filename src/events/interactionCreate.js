@@ -208,19 +208,23 @@ async function handleButton(interaction) {
     if (!offer) {
       return interaction.reply({ content: '❌ Dieser Auftrag existiert nicht mehr.', ephemeral: true });
     }
-    if (interaction.user.id !== offer.senderId) {
+
+    const auftraggeberId = offer.senderRole === 'auftraggeber' ? offer.senderId : offer.targetId;
+    const auftragnehmerId = offer.senderRole === 'auftragnehmer' ? offer.senderId : offer.targetId;
+
+    if (interaction.user.id !== auftraggeberId) {
       return interaction.reply({ content: '❌ Nur der Auftraggeber kann den Auftrag abschließen.', ephemeral: true });
     }
 
-    // Coins an Auftragnehmer zahlen
+    // Coins vom Auftraggeber an Auftragnehmer zahlen
     if (offer.price > 0) {
-      await coinService.transfer(interaction.guild.id, offer.senderId, offer.targetId, offer.price, 'trade', `Auftrag abgeschlossen: ${(offer.description || '').slice(0, 30)}`);
+      await coinService.transfer(interaction.guild.id, auftraggeberId, auftragnehmerId, offer.price, 'trade', `Auftrag abgeschlossen: ${(offer.description || '').slice(0, 30)}`);
     }
 
     const embed = createEmbed({
       title: '✅ Auftrag abgeschlossen!',
       color: COLORS.SUCCESS,
-      description: `<@${offer.targetId}> hat **${formatCoins(offer.price || 0)}** für den Auftrag erhalten.\n\nDieser Channel wird in 10 Sekunden gelöscht.`,
+      description: `<@${auftragnehmerId}> hat **${formatCoins(offer.price || 0)}** für den Auftrag erhalten.\n\nDieser Channel wird in 10 Sekunden gelöscht.`,
     });
     await interaction.update({ embeds: [embed], components: [] });
 
@@ -247,20 +251,24 @@ async function handleButton(interaction) {
     if (!offer) {
       return interaction.reply({ content: '❌ Dieser Auftrag existiert nicht mehr.', ephemeral: true });
     }
-    if (interaction.user.id !== offer.senderId) {
+
+    const auftraggeberId = offer.senderRole === 'auftraggeber' ? offer.senderId : offer.targetId;
+    const auftragnehmerId = offer.senderRole === 'auftragnehmer' ? offer.senderId : offer.targetId;
+
+    if (interaction.user.id !== auftraggeberId) {
       return interaction.reply({ content: '❌ Nur der Auftraggeber kann stornieren.', ephemeral: true });
     }
 
-    // 50% Storno-Gebühr an Auftragnehmer
+    // 50% Storno-Gebühr vom Auftraggeber an Auftragnehmer
     const cancelFee = Math.ceil((offer.price || 0) / 2);
     if (cancelFee > 0) {
-      await coinService.transfer(interaction.guild.id, offer.senderId, offer.targetId, cancelFee, 'trade', `Storno-Gebühr: ${(offer.description || '').slice(0, 30)}`);
+      await coinService.transfer(interaction.guild.id, auftraggeberId, auftragnehmerId, cancelFee, 'trade', `Storno-Gebühr: ${(offer.description || '').slice(0, 30)}`);
     }
 
     const embed = createEmbed({
       title: '❌ Auftrag storniert',
       color: COLORS.ERROR,
-      description: `Der Auftrag wurde storniert. <@${offer.targetId}> erhält **${formatCoins(cancelFee)}** als Storno-Gebühr.\n\nDieser Channel wird in 10 Sekunden gelöscht.`,
+      description: `Der Auftrag wurde storniert. <@${auftragnehmerId}> erhält **${formatCoins(cancelFee)}** als Storno-Gebühr.\n\nDieser Channel wird in 10 Sekunden gelöscht.`,
     });
     await interaction.update({ embeds: [embed], components: [] });
 
@@ -569,6 +577,11 @@ async function handleButton(interaction) {
         .setEmoji('📤')
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
+        .setCustomId('shop_request')
+        .setLabel('Anfragen')
+        .setEmoji('📥')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
         .setCustomId('shop_offers')
         .setLabel(pendingCount > 0 ? `Postfach (${pendingCount})` : 'Postfach')
         .setEmoji('📬')
@@ -617,25 +630,40 @@ async function handleButton(interaction) {
 
     try {
       if (offer.type === 'coins') {
-        // Coins wurden bereits vom Sender abgezogen — jetzt dem Empfänger gutschreiben
-        await coinService.addCoins(interaction.guild.id, offer.targetId, offer.price, 'trade', `Coins erhalten von <@${offer.senderId}>`);
+        if (offer.senderRole === 'auftraggeber') {
+          // Coins-Anfrage: Target (Akzeptierer) muss bezahlen
+          const balance = await coinService.getBalance(interaction.guild.id, offer.targetId);
+          if (balance < offer.price) {
+            return interaction.reply({ content: `❌ Du hast nicht genug Coins! Du brauchst **${formatCoins(offer.price)}**, hast aber nur **${formatCoins(balance)}**.`, ephemeral: true });
+          }
+          await coinService.addCoins(interaction.guild.id, offer.targetId, -offer.price, 'trade', `Coins-Anfrage bezahlt an <@${offer.senderId}>`);
+          await coinService.addCoins(interaction.guild.id, offer.senderId, offer.price, 'trade', `Coins-Anfrage erhalten von <@${offer.targetId}>`);
+        } else {
+          // Coins-Überweisung: wurden bereits vom Sender abgezogen — jetzt dem Empfänger gutschreiben
+          await coinService.addCoins(interaction.guild.id, offer.targetId, offer.price, 'trade', `Coins erhalten von <@${offer.senderId}>`);
+        }
 
         offer.status = 'accepted';
         await offer.save();
 
+        const isRequest = offer.senderRole === 'auftraggeber';
         await Offer.create({
           guildId: offer.guildId,
           senderId: offer.targetId,
           targetId: offer.senderId,
           type: 'notification',
-          description: `✅ <@${offer.targetId}> hat deine Überweisung von **${formatCoins(offer.price)}** angenommen.`,
+          description: isRequest
+            ? `✅ <@${offer.targetId}> hat deine Coins-Anfrage von **${formatCoins(offer.price)}** akzeptiert.`
+            : `✅ <@${offer.targetId}> hat deine Überweisung von **${formatCoins(offer.price)}** angenommen.`,
           price: offer.price,
         });
 
         const embed = createEmbed({
           title: '✅ Angenommen!',
           color: COLORS.SUCCESS,
-          description: `Du hast **${formatCoins(offer.price)}** von <@${offer.senderId}> erhalten.`,
+          description: isRequest
+            ? `Du hast **${formatCoins(offer.price)}** an <@${offer.senderId}> bezahlt.`
+            : `Du hast **${formatCoins(offer.price)}** von <@${offer.senderId}> erhalten.`,
         });
         return interaction.update({ embeds: [embed], components: [] });
       }
@@ -661,13 +689,16 @@ async function handleButton(interaction) {
       offer.status = 'accepted';
       await offer.save();
 
+      const auftraggeberId = offer.senderRole === 'auftraggeber' ? offer.senderId : offer.targetId;
+      const auftragnehmerId = offer.senderRole === 'auftragnehmer' ? offer.senderId : offer.targetId;
+
       const ticketEmbed = createEmbed({
         title: `📋 Auftrag: ${(offer.description || '').slice(0, 50)}`,
-        description: offer.description || 'Kein Beschreibung',
+        description: offer.description || 'Keine Beschreibung',
         color: COLORS.MARKET,
         fields: [
-          { name: 'Auftraggeber', value: `<@${offer.senderId}>`, inline: true },
-          { name: 'Auftragnehmer', value: `<@${offer.targetId}>`, inline: true },
+          { name: 'Auftraggeber', value: `<@${auftraggeberId}>`, inline: true },
+          { name: 'Auftragnehmer', value: `<@${auftragnehmerId}>`, inline: true },
           { name: 'Preis', value: formatCoins(offer.price || 0), inline: true },
         ],
         footer: 'Der Auftraggeber kann den Auftrag als abgeschlossen markieren oder stornieren.',
@@ -717,15 +748,32 @@ async function handleButton(interaction) {
     }
 
     try {
-      await coinService.transfer(interaction.guild.id, offer.targetId, offer.senderId, offer.price, 'trade', `Rollenkauf: <@&${offer.roleId}>`);
+      const isReq = offer.senderRole === 'auftraggeber';
 
-      const sellerMember = await interaction.guild.members.fetch(offer.senderId);
-      const buyerMember = await interaction.guild.members.fetch(offer.targetId);
+      if (isReq) {
+        // Anfrage: Sender (Auftraggeber) kauft die Rolle vom Target
+        // Sender bezahlt, Target gibt Rolle ab
+        await coinService.transfer(interaction.guild.id, offer.senderId, offer.targetId, offer.price, 'trade', `Rollenkauf: <@&${offer.roleId}>`);
 
-      if (sellerMember.roles.cache.has(offer.roleId)) {
-        await sellerMember.roles.remove(offer.roleId).catch(() => {});
+        const targetMember = await interaction.guild.members.fetch(offer.targetId);
+        const senderMember = await interaction.guild.members.fetch(offer.senderId);
+
+        if (targetMember.roles.cache.has(offer.roleId)) {
+          await targetMember.roles.remove(offer.roleId).catch(() => {});
+        }
+        await senderMember.roles.add(offer.roleId).catch(() => {});
+      } else {
+        // Angebot: Target (Akzeptierer) kauft die Rolle vom Sender
+        await coinService.transfer(interaction.guild.id, offer.targetId, offer.senderId, offer.price, 'trade', `Rollenkauf: <@&${offer.roleId}>`);
+
+        const sellerMember = await interaction.guild.members.fetch(offer.senderId);
+        const buyerMember = await interaction.guild.members.fetch(offer.targetId);
+
+        if (sellerMember.roles.cache.has(offer.roleId)) {
+          await sellerMember.roles.remove(offer.roleId).catch(() => {});
+        }
+        await buyerMember.roles.add(offer.roleId).catch(() => {});
       }
-      await buyerMember.roles.add(offer.roleId).catch(() => {});
 
       offer.status = 'accepted';
       await offer.save();
@@ -736,14 +784,18 @@ async function handleButton(interaction) {
         senderId: offer.targetId,
         targetId: offer.senderId,
         type: 'notification',
-        description: `✅ <@${offer.targetId}> hat dein Rollenangebot **${offer.roleName}** für **${formatCoins(offer.price)}** angenommen.`,
+        description: isReq
+          ? `✅ <@${offer.targetId}> hat deine Rollenanfrage **${offer.roleName}** für **${formatCoins(offer.price)}** akzeptiert. Die Rolle wurde übertragen.`
+          : `✅ <@${offer.targetId}> hat dein Rollenangebot **${offer.roleName}** für **${formatCoins(offer.price)}** angenommen.`,
         price: offer.price,
       });
 
       const embed = createEmbed({
-        title: '✅ Rollenangebot angenommen!',
+        title: isReq ? '✅ Rollenanfrage akzeptiert!' : '✅ Rollenangebot angenommen!',
         color: COLORS.SUCCESS,
-        description: `Du hast **${formatCoins(offer.price)}** bezahlt und die Rolle <@&${offer.roleId}> erhalten.`,
+        description: isReq
+          ? `Du hast die Rolle <@&${offer.roleId}> abgegeben und **${formatCoins(offer.price)}** erhalten.`
+          : `Du hast **${formatCoins(offer.price)}** bezahlt und die Rolle <@&${offer.roleId}> erhalten.`,
       });
       return interaction.update({ embeds: [embed], components: [] });
     } catch (err) {
@@ -809,8 +861,8 @@ async function handleButton(interaction) {
       return interaction.reply({ content: '❌ Dieses Angebot ist nicht für dich.', ephemeral: true });
     }
 
-    // Bei Coins-Typ: reservierte Coins zurück an den Sender
-    if (offer.type === 'coins') {
+    // Bei Coins-Überweisung: reservierte Coins zurück an den Sender (nicht bei Anfragen)
+    if (offer.type === 'coins' && offer.senderRole !== 'auftraggeber') {
       await coinService.addCoins(interaction.guild.id, offer.senderId, offer.price, 'trade', `Coins-Überweisung abgelehnt von <@${offer.targetId}>`);
     }
 
@@ -819,12 +871,18 @@ async function handleButton(interaction) {
 
     // Benachrichtigung für den Sender
     let notifDesc;
-    if (offer.type === 'coins') {
+    if (offer.type === 'coins' && offer.senderRole === 'auftraggeber') {
+      notifDesc = `❌ <@${offer.targetId}> hat deine Coins-Anfrage von **${formatCoins(offer.price)}** abgelehnt.`;
+    } else if (offer.type === 'coins') {
       notifDesc = `❌ <@${offer.targetId}> hat deine Überweisung von **${formatCoins(offer.price)}** abgelehnt. Die Coins wurden zurückerstattet.`;
+    } else if (offer.type === 'role' && offer.senderRole === 'auftraggeber') {
+      notifDesc = `❌ <@${offer.targetId}> hat deine Rollenanfrage **${offer.roleName}** abgelehnt.`;
     } else if (offer.type === 'role') {
       notifDesc = `❌ <@${offer.targetId}> hat dein Rollenangebot **${offer.roleName}** abgelehnt.`;
     } else if (offer.type === 'service') {
       notifDesc = `❌ <@${offer.targetId}> hat deine Anfrage für **${offer.serviceName}** abgelehnt.`;
+    } else if (offer.type === 'offer' && offer.senderRole === 'auftraggeber') {
+      notifDesc = `❌ <@${offer.targetId}> hat deine Auftragsanfrage abgelehnt.`;
     } else {
       notifDesc = `❌ <@${offer.targetId}> hat dein Angebot abgelehnt.`;
     }
@@ -839,11 +897,118 @@ async function handleButton(interaction) {
     const embed = createEmbed({
       title: '❌ Abgelehnt',
       color: COLORS.ERROR,
-      description: offer.type === 'coins'
+      description: offer.senderRole === 'auftraggeber'
+        ? `Du hast die Anfrage von <@${offer.senderId}> abgelehnt.`
+        : offer.type === 'coins'
         ? `Du hast die Überweisung von **${formatCoins(offer.price)}** von <@${offer.senderId}> abgelehnt.`
         : `Du hast das Angebot von <@${offer.senderId}> abgelehnt.`,
     });
     return interaction.update({ embeds: [embed], components: [] });
+  }
+
+  // Shop request button - show user select
+  if (id === 'shop_request') {
+    const { ActionRowBuilder, UserSelectMenuBuilder } = require('discord.js');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const embed = createEmbed({
+      title: '📥 Auftrag anfragen',
+      description: 'Wähle einen User aus, von dem du etwas anfragen möchtest.',
+      color: COLORS.MARKET,
+    });
+    const row = new ActionRowBuilder().addComponents(
+      new UserSelectMenuBuilder()
+        .setCustomId('shop_request_target')
+        .setPlaceholder('User auswählen...')
+    );
+    return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+  }
+
+  // Shop request action buttons
+  if (id.startsWith('shop_request_coins_') || id.startsWith('shop_request_offer_') || id.startsWith('shop_request_role_')) {
+    const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
+
+    if (id.startsWith('shop_request_coins_')) {
+      const targetId = id.replace('shop_request_coins_', '');
+      const modal = new ModalBuilder()
+        .setCustomId(`modal_request_coins_${targetId}`)
+        .setTitle('Coins anfragen');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId('amount')
+            .setLabel('Betrag')
+            .setPlaceholder('z.B. 100')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+        ),
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId('message')
+            .setLabel('Nachricht (optional)')
+            .setPlaceholder('z.B. Für die Arbeit letzte Woche')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(false)
+        ),
+      );
+      return interaction.showModal(modal);
+    }
+
+    if (id.startsWith('shop_request_offer_')) {
+      const targetId = id.replace('shop_request_offer_', '');
+      const modal = new ModalBuilder()
+        .setCustomId(`modal_request_offer_${targetId}`)
+        .setTitle('Auftrag anfragen');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId('description')
+            .setLabel('Beschreibung')
+            .setPlaceholder('Was soll gemacht werden?')
+            .setStyle(TextInputStyle.Paragraph)
+            .setRequired(true)
+        ),
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId('price')
+            .setLabel('Preis (Coins)')
+            .setPlaceholder('z.B. 500')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+        ),
+      );
+      return interaction.showModal(modal);
+    }
+
+    if (id.startsWith('shop_request_role_')) {
+      const targetId = id.replace('shop_request_role_', '');
+      const { ActionRowBuilder: AR, StringSelectMenuBuilder } = require('discord.js');
+      const { createEmbed, COLORS } = require('../utils/embedBuilder');
+
+      const member = await interaction.guild.members.fetch(targetId);
+      const userRoles = member.roles.cache
+        .filter(r => r.id !== interaction.guild.id && !r.managed)
+        .sort((a, b) => b.position - a.position)
+        .first(25);
+
+      if (userRoles.length === 0) {
+        return interaction.reply({ content: '❌ Dieser User besitzt keine Rollen, die du anfragen kannst.', ephemeral: true });
+      }
+
+      const embed = createEmbed({
+        title: '🏷️ Rolle anfragen',
+        description: `Wähle eine Rolle von <@${targetId}> aus, die du anfragen möchtest.`,
+        color: COLORS.MARKET,
+      });
+      const selectMenu = new StringSelectMenuBuilder()
+        .setCustomId(`shop_request_role_select_${targetId}`)
+        .setPlaceholder('Rolle auswählen...')
+        .addOptions(userRoles.map(r => ({
+          label: r.name,
+          value: r.id,
+          emoji: '🏷️',
+        })));
+      return interaction.reply({ embeds: [embed], components: [new AR().addComponents(selectMenu)], ephemeral: true });
+    }
   }
 
   // Shop send button - show user select
@@ -851,7 +1016,7 @@ async function handleButton(interaction) {
     const { ActionRowBuilder, UserSelectMenuBuilder } = require('discord.js');
     const { createEmbed, COLORS } = require('../utils/embedBuilder');
     const embed = createEmbed({
-      title: '📤 Senden',
+      title: '📤 Angebot senden',
       description: 'Wähle einen User aus, an den du etwas senden möchtest.',
       color: COLORS.MARKET,
     });
@@ -897,13 +1062,13 @@ async function handleButton(interaction) {
 
     const modal = new ModalBuilder()
       .setCustomId(`modal_send_offer_${targetId}`)
-      .setTitle('Angebot senden');
+      .setTitle('Auftrag anbieten');
     modal.addComponents(
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
           .setCustomId('description')
           .setLabel('Beschreibung')
-          .setPlaceholder('Was bietest du an?')
+          .setPlaceholder('Was soll gemacht werden?')
           .setStyle(TextInputStyle.Paragraph)
           .setRequired(true)
       ),
@@ -974,21 +1139,33 @@ async function handleButton(interaction) {
       return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
+    const isRequest = (o) => o.senderRole === 'auftraggeber';
     const lines = offers.map((o, i) => {
       if (o.type === 'notification') {
         return `**${i + 1}.** 🔔 ${o.description}`;
       }
       if (o.type === 'role') {
-        return `**${i + 1}.** 🏷️ Rolle: **${o.roleName}**\n> Von: <@${o.senderId}> • Preis: ${formatCoins(o.price || 0)}`;
+        if (isRequest(o)) {
+          return `**${i + 1}.** 📥 Rollenanfrage: **${o.roleName}**\n> <@${o.senderId}> möchte deine Rolle für ${formatCoins(o.price || 0)} kaufen`;
+        }
+        return `**${i + 1}.** 🏷️ Rollenangebot: **${o.roleName}**\n> <@${o.senderId}> bietet dir die Rolle für ${formatCoins(o.price || 0)} an`;
       }
       if (o.type === 'service') {
         return `**${i + 1}.** 🔧 Service-Anfrage: **${o.serviceName}**\n> Von: <@${o.senderId}> • ${formatCoins(o.price || 0)}\n> ${(o.description || '').slice(0, 80)}`;
       }
       if (o.type === 'offer') {
-        return `**${i + 1}.** 📋 Angebot von <@${o.senderId}>\n> ${o.description}\n> Preis: ${formatCoins(o.price || 0)}`;
+        if (isRequest(o)) {
+          return `**${i + 1}.** 📥 Auftragsanfrage von <@${o.senderId}>\n> ${o.description}\n> 💰 ${formatCoins(o.price || 0)} • Du wärst Auftragnehmer`;
+        }
+        return `**${i + 1}.** 📋 Auftragsangebot von <@${o.senderId}>\n> ${o.description}\n> 💰 ${formatCoins(o.price || 0)} • Du wärst Auftraggeber`;
+      }
+      // Coins
+      if (isRequest(o)) {
+        const msg = o.description ? `\n> 💬 "${o.description}"` : '';
+        return `**${i + 1}.** 📥 <@${o.senderId}> fordert ${formatCoins(o.price || 0)} von dir${msg}`;
       }
       const msg = o.description ? `\n> 💬 "${o.description}"` : '';
-      return `**${i + 1}.** 💰 ${formatCoins(o.price || 0)} von <@${o.senderId}>${msg}`;
+      return `**${i + 1}.** 💰 <@${o.senderId}> sendet dir ${formatCoins(o.price || 0)}${msg}`;
     });
 
     // Benachrichtigungen automatisch als gelesen markieren
@@ -1014,21 +1191,22 @@ async function handleButton(interaction) {
 
     const selectMenu = new StringSelectMenuBuilder()
       .setCustomId('shop_offer_view')
-      .setPlaceholder('Angebot einsehen...')
+      .setPlaceholder('Eintrag einsehen...')
       .addOptions(actionableOffers.map((o) => {
         let label, desc;
+        const req = o.senderRole === 'auftraggeber';
         if (o.type === 'role') {
-          label = `🏷️ Rolle: ${o.roleName || 'Unbekannt'}`;
+          label = req ? `📥 Rollenanfrage: ${o.roleName || 'Unbekannt'}` : `🏷️ Rollenangebot: ${o.roleName || 'Unbekannt'}`;
           desc = formatCoins(o.price || 0);
         } else if (o.type === 'service') {
           label = `🔧 ${o.serviceName || 'Service'}`;
           desc = `${formatCoins(o.price || 0)} • ${(o.description || '').slice(0, 30) || 'Anfrage'}`;
         } else if (o.type === 'offer') {
-          label = `📋 ${(o.description || 'Angebot').slice(0, 40)}`;
+          label = req ? `📥 Anfrage: ${(o.description || 'Auftrag').slice(0, 35)}` : `📋 Angebot: ${(o.description || 'Auftrag').slice(0, 35)}`;
           desc = formatCoins(o.price || 0);
         } else {
-          label = `💰 ${formatCoins(o.price || 0)}`;
-          desc = 'Coins-Überweisung';
+          label = req ? `📥 Coins-Anfrage: ${formatCoins(o.price || 0)}` : `💰 Coins: ${formatCoins(o.price || 0)}`;
+          desc = req ? 'Fordert Coins von dir' : 'Coins-Überweisung';
         }
         return { label: label.slice(0, 100), description: desc.slice(0, 100), value: o._id.toString() };
       }));
@@ -1050,31 +1228,55 @@ async function handleButton(interaction) {
       return interaction.reply({ content: '❌ Dieses Angebot ist nicht mehr gültig.', ephemeral: true });
     }
 
+    const isReq = offer.senderRole === 'auftraggeber';
     const fields = [{ name: 'Betrag', value: formatCoins(offer.price || 0), inline: true }];
-    let title;
+    let title, detailDesc;
     if (offer.type === 'role') {
-      title = '🏷️ Rollenangebot';
-      fields.unshift({ name: 'Rolle', value: `<@&${offer.roleId}>`, inline: true });
+      if (isReq) {
+        title = '📥 Rollenanfrage';
+        detailDesc = `<@${offer.senderId}> möchte deine Rolle kaufen.`;
+        fields.unshift({ name: 'Rolle', value: `<@&${offer.roleId}>`, inline: true });
+        fields.push({ name: 'Info', value: `Du gibst die Rolle ab und erhältst **${formatCoins(offer.price || 0)}**.` });
+      } else {
+        title = '🏷️ Rollenangebot';
+        detailDesc = `<@${offer.senderId}> bietet dir eine Rolle an.`;
+        fields.unshift({ name: 'Rolle', value: `<@&${offer.roleId}>`, inline: true });
+        fields.push({ name: 'Info', value: `Du bezahlst **${formatCoins(offer.price || 0)}** und erhältst die Rolle.` });
+      }
     } else if (offer.type === 'service') {
       title = '🔧 Service-Anfrage';
+      detailDesc = `Von: <@${offer.senderId}>`;
       fields.unshift({ name: 'Dienstleistung', value: offer.serviceName || 'Unbekannt', inline: true });
       fields.push({ name: 'Nachricht', value: offer.description || '-' });
     } else if (offer.type === 'offer') {
-      title = '📋 Angebot';
+      if (isReq) {
+        title = '📥 Auftragsanfrage';
+        detailDesc = `<@${offer.senderId}> möchte dich beauftragen.\nDu wärst **Auftragnehmer** und erhältst bei Abschluss die Bezahlung.`;
+      } else {
+        title = '📋 Auftragsangebot';
+        detailDesc = `<@${offer.senderId}> bietet dir seine Arbeit an.\nDu wärst **Auftraggeber** und bezahlst bei Abschluss.`;
+      }
       fields.unshift({ name: 'Beschreibung', value: offer.description });
     } else if (offer.type === 'coins') {
-      title = '💰 Coins-Überweisung';
+      if (isReq) {
+        title = '📥 Coins-Anfrage';
+        detailDesc = `<@${offer.senderId}> fordert **${formatCoins(offer.price || 0)}** von dir.`;
+      } else {
+        title = '💰 Coins-Überweisung';
+        detailDesc = `<@${offer.senderId}> sendet dir **${formatCoins(offer.price || 0)}**.`;
+      }
       if (offer.description) {
         fields.push({ name: 'Nachricht', value: offer.description });
       }
     } else {
       title = '💰 Angebot';
+      detailDesc = `Von: <@${offer.senderId}>`;
     }
 
     const embed = createEmbed({
       title,
       color: COLORS.MARKET,
-      description: `Von: <@${offer.senderId}>`,
+      description: detailDesc,
       fields,
     });
 
@@ -1473,31 +1675,55 @@ async function handleSelectMenu(interaction) {
       return interaction.reply({ content: '❌ Dieses Angebot ist nicht mehr gültig.', ephemeral: true });
     }
 
+    const isReq = offer.senderRole === 'auftraggeber';
     const fields = [{ name: 'Betrag', value: formatCoins(offer.price || 0), inline: true }];
-    let title;
+    let title, detailDesc;
     if (offer.type === 'role') {
-      title = '🏷️ Rollenangebot';
-      fields.unshift({ name: 'Rolle', value: `<@&${offer.roleId}>`, inline: true });
+      if (isReq) {
+        title = '📥 Rollenanfrage';
+        detailDesc = `<@${offer.senderId}> möchte deine Rolle kaufen.`;
+        fields.unshift({ name: 'Rolle', value: `<@&${offer.roleId}>`, inline: true });
+        fields.push({ name: 'Info', value: `Du gibst die Rolle ab und erhältst **${formatCoins(offer.price || 0)}**.` });
+      } else {
+        title = '🏷️ Rollenangebot';
+        detailDesc = `<@${offer.senderId}> bietet dir eine Rolle an.`;
+        fields.unshift({ name: 'Rolle', value: `<@&${offer.roleId}>`, inline: true });
+        fields.push({ name: 'Info', value: `Du bezahlst **${formatCoins(offer.price || 0)}** und erhältst die Rolle.` });
+      }
     } else if (offer.type === 'service') {
       title = '🔧 Service-Anfrage';
+      detailDesc = `Von: <@${offer.senderId}>`;
       fields.unshift({ name: 'Dienstleistung', value: offer.serviceName || 'Unbekannt', inline: true });
       fields.push({ name: 'Nachricht', value: offer.description || '-' });
     } else if (offer.type === 'offer') {
-      title = '📋 Angebot';
+      if (isReq) {
+        title = '📥 Auftragsanfrage';
+        detailDesc = `<@${offer.senderId}> möchte dich beauftragen.\nDu wärst **Auftragnehmer** und erhältst bei Abschluss die Bezahlung.`;
+      } else {
+        title = '📋 Auftragsangebot';
+        detailDesc = `<@${offer.senderId}> bietet dir seine Arbeit an.\nDu wärst **Auftraggeber** und bezahlst bei Abschluss.`;
+      }
       fields.unshift({ name: 'Beschreibung', value: offer.description });
     } else if (offer.type === 'coins') {
-      title = '💰 Coins-Überweisung';
+      if (isReq) {
+        title = '📥 Coins-Anfrage';
+        detailDesc = `<@${offer.senderId}> fordert **${formatCoins(offer.price || 0)}** von dir.`;
+      } else {
+        title = '💰 Coins-Überweisung';
+        detailDesc = `<@${offer.senderId}> sendet dir **${formatCoins(offer.price || 0)}**.`;
+      }
       if (offer.description) {
         fields.push({ name: 'Nachricht', value: offer.description });
       }
     } else {
       title = '💰 Angebot';
+      detailDesc = `Von: <@${offer.senderId}>`;
     }
 
     const embed = createEmbed({
       title,
       color: COLORS.MARKET,
-      description: `Von: <@${offer.senderId}>`,
+      description: detailDesc,
       fields,
     });
 
@@ -1548,6 +1774,33 @@ async function handleSelectMenu(interaction) {
     );
     return interaction.showModal(modal);
   }
+
+  // Role request select
+  if (id.startsWith('shop_request_role_select_')) {
+    const targetId = id.replace('shop_request_role_select_', '');
+    const roleId = interaction.values[0];
+    const role = await interaction.guild.roles.fetch(roleId);
+
+    if (!role) {
+      return interaction.reply({ content: '❌ Diese Rolle existiert nicht mehr.', ephemeral: true });
+    }
+
+    const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
+    const modal = new ModalBuilder()
+      .setCustomId(`modal_request_role_${targetId}_${roleId}`)
+      .setTitle(`Rolle anfragen: ${role.name.slice(0, 30)}`);
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('price')
+          .setLabel('Preis (Coins, den du zahlen würdest)')
+          .setPlaceholder('z.B. 500')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
+    );
+    return interaction.showModal(modal);
+  }
 }
 
 async function handleUserSelectMenu(interaction) {
@@ -1566,7 +1819,7 @@ async function handleUserSelectMenu(interaction) {
     }
 
     const embed = createEmbed({
-      title: '📤 Senden an ' + targetUser.displayName,
+      title: '📤 Angebot senden an ' + targetUser.displayName,
       description: 'Was möchtest du senden?',
       color: COLORS.MARKET,
       thumbnail: targetUser.displayAvatarURL(),
@@ -1580,12 +1833,52 @@ async function handleUserSelectMenu(interaction) {
         .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
         .setCustomId(`shop_send_offer_${targetUser.id}`)
-        .setLabel('Angebot senden')
+        .setLabel('Auftrag anbieten')
         .setEmoji('📋')
         .setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
         .setCustomId(`shop_send_role_${targetUser.id}`)
         .setLabel('Rolle anbieten')
+        .setEmoji('🏷️')
+        .setStyle(ButtonStyle.Secondary),
+    );
+
+    return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+  }
+
+  if (id === 'shop_request_target') {
+    const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const targetUser = interaction.users.first();
+
+    if (targetUser.id === interaction.user.id) {
+      return interaction.reply({ content: '❌ Du kannst nichts von dir selbst anfragen.', ephemeral: true });
+    }
+    if (targetUser.bot) {
+      return interaction.reply({ content: '❌ Du kannst nichts von Bots anfragen.', ephemeral: true });
+    }
+
+    const embed = createEmbed({
+      title: '📥 Auftrag anfragen von ' + targetUser.displayName,
+      description: 'Was möchtest du anfragen?',
+      color: COLORS.MARKET,
+      thumbnail: targetUser.displayAvatarURL(),
+    });
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`shop_request_coins_${targetUser.id}`)
+        .setLabel('Coins anfragen')
+        .setEmoji('💰')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`shop_request_offer_${targetUser.id}`)
+        .setLabel('Auftrag anfragen')
+        .setEmoji('📋')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`shop_request_role_${targetUser.id}`)
+        .setLabel('Rolle anfragen')
         .setEmoji('🏷️')
         .setStyle(ButtonStyle.Secondary),
     );
@@ -1658,8 +1951,13 @@ async function handleModal(interaction) {
       buttons.push(
         new ButtonBuilder()
           .setCustomId('shop_send')
-          .setLabel('Senden')
+          .setLabel('Angebot senden')
           .setEmoji('📤')
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId('shop_request')
+          .setLabel('Auftrag anfragen')
+          .setEmoji('📥')
           .setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
           .setCustomId('shop_offers')
@@ -1673,6 +1971,75 @@ async function handleModal(interaction) {
     } catch (err) {
       return interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
     }
+  }
+
+  // Coins anfragen
+  if (id.startsWith('modal_request_coins_')) {
+    const Offer = require('../models/Offer');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const { formatCoins } = require('../utils/formatters');
+    const targetId = id.replace('modal_request_coins_', '');
+    const amount = parseInt(interaction.fields.getTextInputValue('amount'));
+    const message = interaction.fields.getTextInputValue('message') || '';
+
+    if (isNaN(amount) || amount <= 0) {
+      return interaction.reply({ content: '❌ Bitte gib einen gültigen Betrag ein.', ephemeral: true });
+    }
+
+    await Offer.create({
+      guildId: interaction.guild.id,
+      senderId: interaction.user.id,
+      targetId,
+      type: 'coins',
+      price: amount,
+      description: message || null,
+      senderRole: 'auftraggeber',
+    });
+
+    const msgInfo = message ? `\n> 💬 "${message}"` : '';
+    const embed = createEmbed({
+      title: '✅ Coins-Anfrage gesendet!',
+      color: COLORS.SUCCESS,
+      description: `Du hast **${formatCoins(amount)}** von <@${targetId}> angefragt.${msgInfo}\n\nDer User muss die Anfrage im Postfach akzeptieren.`,
+    });
+    return interaction.reply({ embeds: [embed], ephemeral: true });
+  }
+
+  // Auftrag anfragen (Sender = Auftragnehmer, bietet seine Arbeit an)
+  if (id.startsWith('modal_request_offer_')) {
+    const Offer = require('../models/Offer');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const { formatCoins } = require('../utils/formatters');
+    const targetId = id.replace('modal_request_offer_', '');
+    const description = interaction.fields.getTextInputValue('description');
+    const price = parseInt(interaction.fields.getTextInputValue('price'));
+
+    if (isNaN(price) || price <= 0) {
+      return interaction.reply({ content: '❌ Bitte gib einen gültigen Preis ein.', ephemeral: true });
+    }
+
+    await Offer.create({
+      guildId: interaction.guild.id,
+      senderId: interaction.user.id,
+      targetId,
+      type: 'offer',
+      description,
+      price,
+      senderRole: 'auftraggeber',
+    });
+
+    const embed = createEmbed({
+      title: '✅ Auftrag angefragt!',
+      color: COLORS.SUCCESS,
+      description: `Deine Anfrage wurde an <@${targetId}> gesendet.`,
+      fields: [
+        { name: 'Beschreibung', value: description.slice(0, 100) },
+        { name: 'Preis', value: formatCoins(price), inline: true },
+        { name: 'Auftraggeber (Du)', value: `<@${interaction.user.id}>`, inline: true },
+        { name: 'Auftragnehmer', value: `<@${targetId}>`, inline: true },
+      ],
+    });
+    return interaction.reply({ embeds: [embed], ephemeral: true });
   }
 
   // Coins senden — Angebot erstellen
@@ -1750,9 +2117,46 @@ async function handleModal(interaction) {
     });
   }
 
-  // Angebot senden
+  // Rolle anfragen
+  if (id.startsWith('modal_request_role_')) {
+    const Offer = require('../models/Offer');
+    // Format: modal_request_role_{targetId}_{roleId}
+    const parts = id.split('_');
+    const targetId = parts[3];
+    const roleId = parts[4];
+    const price = parseInt(interaction.fields.getTextInputValue('price'));
+
+    if (isNaN(price) || price <= 0) {
+      return interaction.reply({ content: '❌ Bitte gib einen gültigen Preis ein.', ephemeral: true });
+    }
+
+    const role = await interaction.guild.roles.fetch(roleId);
+    if (!role) {
+      return interaction.reply({ content: '❌ Diese Rolle existiert nicht mehr.', ephemeral: true });
+    }
+
+    await Offer.create({
+      guildId: interaction.guild.id,
+      senderId: interaction.user.id,
+      targetId,
+      type: 'role',
+      price,
+      roleId,
+      roleName: role.name,
+      senderRole: 'auftraggeber',
+    });
+
+    return interaction.reply({
+      content: `✅ Rollenanfrage für **${role.name}** an <@${targetId}> gesendet! Der User kann es unter 📬 Postfach einsehen.`,
+      ephemeral: true,
+    });
+  }
+
+  // Auftrag anbieten (Sender = Auftragnehmer)
   if (id.startsWith('modal_send_offer_')) {
     const Offer = require('../models/Offer');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const { formatCoins } = require('../utils/formatters');
     const targetId = id.replace('modal_send_offer_', '');
     const description = interaction.fields.getTextInputValue('description');
     const price = parseInt(interaction.fields.getTextInputValue('price'));
@@ -1768,12 +2172,21 @@ async function handleModal(interaction) {
       type: 'offer',
       description,
       price,
+      senderRole: 'auftragnehmer',
     });
 
-    return interaction.reply({
-      content: `✅ Angebot an <@${targetId}> gesendet! Der User kann es unter 📬 Postfach einsehen.`,
-      ephemeral: true,
+    const embed = createEmbed({
+      title: '✅ Auftrag angeboten!',
+      color: COLORS.SUCCESS,
+      description: `Der Auftrag wurde an <@${targetId}> gesendet.`,
+      fields: [
+        { name: 'Beschreibung', value: description.slice(0, 100) },
+        { name: 'Preis', value: formatCoins(price), inline: true },
+        { name: 'Auftragnehmer (Du)', value: `<@${interaction.user.id}>`, inline: true },
+        { name: 'Auftraggeber', value: `<@${targetId}>`, inline: true },
+      ],
     });
+    return interaction.reply({ embeds: [embed], ephemeral: true });
   }
 
   // Service anfragen — Ticket erstellen

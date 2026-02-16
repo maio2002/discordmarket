@@ -10,6 +10,7 @@ const offerSchema = new Schema({
   roleId:      { type: String, default: null },
   roleName:    { type: String, default: null },
   serviceName: { type: String, default: null },
+  senderRole:  { type: String, enum: ['auftraggeber', 'auftragnehmer', null], default: null },
   messageId:   { type: String, default: null },
   channelId:   { type: String, default: null },
   status:      { type: String, enum: ['pending', 'accepted', 'denied'], default: 'pending' },
