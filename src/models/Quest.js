@@ -5,6 +5,7 @@ const questSchema = new mongoose.Schema({
   title:       { type: String, required: true },
   description: { type: String, required: true },
   reward:      { type: Number, required: true },
+  condition:   { type: String, required: true },
   createdBy:   { type: String, required: true },
   status:      { type: String, enum: ['open', 'completed', 'cancelled'], default: 'open' },
   participants: [{

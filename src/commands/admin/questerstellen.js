@@ -16,11 +16,15 @@ module.exports = {
     .addIntegerOption(opt =>
       opt.setName('belohnung').setDescription('Belohnung in Coins').setRequired(true).setMinValue(1)
     )
+    .addStringOption(opt =>
+      opt.setName('bedingung').setDescription('Bedingung zum Abschließen der Quest').setRequired(true)
+    )
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
   async execute(interaction) {
     const title = interaction.options.getString('titel');
     const description = interaction.options.getString('beschreibung');
     const reward = interaction.options.getInteger('belohnung');
+    const condition = interaction.options.getString('bedingung');
 
     try {
       const quest = await questService.createQuest(
@@ -28,16 +32,22 @@ module.exports = {
         title,
         description,
         reward,
-        interaction.user.id
+        interaction.user.id,
+        condition
       );
+
+      const fields = [
+        { name: 'Titel', value: quest.title, inline: true },
+        { name: 'Belohnung', value: formatCoins(reward), inline: true },
+      ];
+      if (condition) {
+        fields.push({ name: '🎯 Bedingung', value: condition });
+      }
 
       const embed = createEmbed({
         title: 'Quest erstellt ✅',
         color: COLORS.SUCCESS,
-        fields: [
-          { name: 'Titel', value: quest.title, inline: true },
-          { name: 'Belohnung', value: formatCoins(reward), inline: true },
-        ],
+        fields,
         description: `> ${description}`,
       });
       await interaction.reply({ embeds: [embed], ephemeral: true });

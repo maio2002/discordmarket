@@ -182,7 +182,8 @@ async function renderQuestsPage(guildId, page = 1) {
 
   const lines = quests.map(q => {
     const participants = q.participants ? q.participants.length : 0;
-    return `**${q.title}**\n> ${q.description}\n> 🏆 Belohnung: ${formatCoins(q.reward)} • 👥 ${participants} Teilnehmer`;
+    const cond = q.condition ? `\n> 🎯 Bedingung: ${q.condition}` : '';
+    return `**${q.title}**\n> ${q.description}${cond}\n> 🏆 Belohnung: ${formatCoins(q.reward)} • 👥 ${participants} Teilnehmer`;
   });
 
   const embed = createEmbed({

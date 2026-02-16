@@ -6,8 +6,8 @@ const { createEmbed, COLORS } = require('../utils/embedBuilder');
 const { formatCoins } = require('../utils/formatters');
 const { jobRoles } = require('../config');
 
-async function createQuest(guildId, title, description, reward, createdBy) {
-  return Quest.create({ guildId, title, description, reward, createdBy });
+async function createQuest(guildId, title, description, reward, createdBy, condition = null) {
+  return Quest.create({ guildId, title, description, reward, createdBy, condition });
 }
 
 async function getOpenQuests(guildId, page = 1, perPage = 5) {
@@ -51,14 +51,19 @@ async function claimQuest(guildId, questId, userId, guild) {
     });
     participant.channelId = channel.id;
 
+    const questFields = [
+      { name: 'Teilnehmer', value: `<@${userId}>`, inline: true },
+      { name: 'Belohnung', value: formatCoins(quest.reward), inline: true },
+    ];
+    if (quest.condition) {
+      questFields.push({ name: '🎯 Bedingung', value: quest.condition });
+    }
+
     const embed = createEmbed({
       title: `📋 Quest: ${quest.title}`,
       description: quest.description,
       color: COLORS.MARKET,
-      fields: [
-        { name: 'Teilnehmer', value: `<@${userId}>`, inline: true },
-        { name: 'Belohnung', value: formatCoins(quest.reward), inline: true },
-      ],
+      fields: questFields,
       footer: 'Ein Prüfer kann diese Quest abschließen oder ablehnen.',
     });
 
