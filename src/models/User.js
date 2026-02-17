@@ -17,6 +17,7 @@ const userSchema = new mongoose.Schema({
   isMember:        { type: Boolean, default: false },
   isVip:           { type: Boolean, default: false },
   lastWeeklyBonus: { type: Date, default: null },
+  dmNotifications: { type: Boolean, default: true },
 }, { timestamps: true });
 
 userSchema.index({ guildId: 1, userId: 1 }, { unique: true });

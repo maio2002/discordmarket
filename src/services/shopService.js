@@ -108,6 +108,19 @@ async function renderRolesPage(guildId, page = 1) {
     }
   }
 
+  components.push(new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('shop_random_role')
+      .setLabel(`Zufällige Rolle (${formatCoins(1000)})`)
+      .setEmoji('🎲')
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId('shop_custom_role')
+      .setLabel(`Rolle selbsterzeugen (${formatCoins(2500)})`)
+      .setEmoji('✨')
+      .setStyle(ButtonStyle.Secondary),
+  ));
+
   return { embed, components, totalPages };
 }
 

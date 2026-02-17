@@ -36,7 +36,7 @@ function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-async function buyRole(guildId, userId, roleName, guild) {
+async function buyRole(guildId, userId, roleName, guild, priceOverride = null) {
   const marketRole = await MarketRole.findOne({ guildId, name: { $regex: new RegExp(`^${escapeRegex(roleName)}$`, 'i') } });
   if (!marketRole) {
     throw new Error('Diese Rolle existiert nicht im Shop.');
@@ -51,7 +51,7 @@ async function buyRole(guildId, userId, roleName, guild) {
     throw new Error('Du besitzt diese Rolle bereits.');
   }
 
-  const price = marketRole.isPrestige ? COINS.PRESTIGE_COST : marketRole.price;
+  const price = priceOverride != null ? priceOverride : (marketRole.isPrestige ? COINS.PRESTIGE_COST : marketRole.price);
 
   const user = await xpService.getOrCreateUser(guildId, userId);
   if (user.lastRoleBuy) {
