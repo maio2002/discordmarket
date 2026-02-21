@@ -88,25 +88,40 @@ async function renderRolesPage(guildId, page = 1) {
   const pagination = buildPaginationRow('roles', page, totalPages);
   if (pagination) components.push(pagination);
 
+  const selectOptions = [
+    {
+      label: '🎲 Zufällige Rolle',
+      description: `${formatCoins(1000)} • Überraschung!`,
+      value: 'random_role',
+      emoji: '🎲',
+    },
+    {
+      label: '✨ Eigene Rolle erstellen',
+      description: `${formatCoins(2500)} • Rollenname beginnt mit *`,
+      value: 'create_custom_role',
+      emoji: '✨',
+    },
+  ];
+
   if (roles.length > 0) {
-    const selectMenu = new StringSelectMenuBuilder()
-      .setCustomId(`shop_buy_role_${page}`)
-      .setPlaceholder('Rolle zum Kaufen auswählen...')
-      .addOptions(
-        roles
-          .filter(r => (r.totalStock - r.purchased) > 0)
-          .slice(0, 25)
-          .map(r => ({
-            label: r.name,
-            description: `${formatCoins(r.isPrestige ? 6000 : r.price)} • ${r.totalStock - r.purchased} verfügbar`,
-            value: r.name,
-            emoji: r.isPrestige ? '⭐' : '🏷️',
-          }))
-      );
-    if (selectMenu.options.length > 0) {
-      components.push(new ActionRowBuilder().addComponents(selectMenu));
-    }
+    selectOptions.push(
+      ...roles
+        .filter(r => (r.totalStock - r.purchased) > 0)
+        .slice(0, 23)
+        .map(r => ({
+          label: r.name,
+          description: `${formatCoins(r.isPrestige ? 6000 : r.price)} • ${r.totalStock - r.purchased} verfügbar`,
+          value: r.name,
+          emoji: r.isPrestige ? '⭐' : '🏷️',
+        }))
+    );
   }
+
+  const selectMenu = new StringSelectMenuBuilder()
+    .setCustomId(`shop_buy_role_${page}`)
+    .setPlaceholder('Rolle auswählen...')
+    .addOptions(selectOptions);
+  components.push(new ActionRowBuilder().addComponents(selectMenu));
 
   /*components.push(new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -157,20 +172,31 @@ async function renderServicesPage(guildId, page = 1) {
   const pagination = buildPaginationRow('services', page, totalPages);
   if (pagination) components.push(pagination);
 
+  const selectOptions = [
+    {
+      label: '➕ Eigenen Service einreichen',
+      description: 'Biete deine eigene Dienstleistung an',
+      value: 'create_own_service',
+      emoji: '✨',
+    },
+  ];
+
   if (services.length > 0) {
-    const selectMenu = new StringSelectMenuBuilder()
-      .setCustomId(`shop_service_request_${page}`)
-      .setPlaceholder('Dienstleistung anfragen...')
-      .addOptions(
-        services.slice(0, 25).map(s => ({
-          label: s.name,
-          description: `${formatCoins(s.price)}`,
-          value: s._id.toString(),
-          emoji: '🔧',
-        }))
-      );
-    components.push(new ActionRowBuilder().addComponents(selectMenu));
+    selectOptions.push(
+      ...services.slice(0, 24).map(s => ({
+        label: s.name,
+        description: `${formatCoins(s.price)}`,
+        value: s._id.toString(),
+        emoji: '🔧',
+      }))
+    );
   }
+
+  const selectMenu = new StringSelectMenuBuilder()
+    .setCustomId(`shop_service_request_${page}`)
+    .setPlaceholder('Dienstleistung auswählen...')
+    .addOptions(selectOptions);
+  components.push(new ActionRowBuilder().addComponents(selectMenu));
 
   return { embed, components, totalPages };
 }

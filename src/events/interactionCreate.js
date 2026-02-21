@@ -10,23 +10,36 @@ async function sendDmNotification(client, guildId, targetUserId, message, channe
     if (userDoc && userDoc.dmNotifications === false) return;
     const user = await client.users.fetch(targetUserId);
 
-    const buttons = [
-      new ButtonBuilder()
-        .setCustomId('dm_gelesen')
-        .setLabel('Gelesen')
-        .setEmoji('✅')
-        .setStyle(ButtonStyle.Secondary),
-    ];
+    const buttons = [];
 
+    // Link zum angegebenen Kanal (z.B. wo die Anfrage kam)
     if (channelId) {
-      buttons.unshift(
+      buttons.push(
         new ButtonBuilder()
           .setURL(`https://discord.com/channels/${guildId}/${channelId}`)
           .setLabel('Zum Kanal')
           .setEmoji('🔗')
-          .setStyle(ButtonStyle.Link),
+          .setStyle(ButtonStyle.Link)
       );
     }
+
+    // Button zum Postfach (Custom ID für DM-Kontext)
+    buttons.push(
+      new ButtonBuilder()
+        .setCustomId(`dm_open_postfach_${guildId}`)
+        .setLabel('Zum Postfach')
+        .setEmoji('📬')
+        .setStyle(ButtonStyle.Primary)
+    );
+
+    // Delete-Button (Mülleimer)
+    buttons.push(
+      new ButtonBuilder()
+        .setCustomId('dm_delete')
+        .setLabel('Löschen')
+        .setEmoji('🗑️')
+        .setStyle(ButtonStyle.Secondary)
+    );
 
     const row = new ActionRowBuilder().addComponents(buttons);
     await user.send({ content: message, components: [row] });
@@ -149,14 +162,23 @@ module.exports = {
 async function handleButton(interaction) {
   const id = interaction.customId;
 
-  // DM button — Gelesen → Nachricht löschen
-  if (id === 'dm_gelesen') {
+  // DM button — Löschen oder Gelesen → Nachricht löschen
+  if (id === 'dm_delete' || id === 'dm_gelesen') {
     try {
       await interaction.message.delete();
     } catch (err) {
-      await interaction.reply({ content: '✅ Gelesen.' }).catch(() => {});
+      await interaction.reply({ content: '✅ Nachricht wurde gelöscht.' }).catch(() => {});
     }
     return;
+  }
+
+  // DM button — Zum Postfach
+  if (id.startsWith('dm_open_postfach_')) {
+    const guildId = id.replace('dm_open_postfach_', '');
+    return interaction.reply({
+      content: `📬 Öffne dein Postfach im Server mit \`/shop\` → **Postfach**\n\nOder klicke hier: https://discord.com/channels/${guildId}`,
+      ephemeral: true,
+    });
   }
 
   if (id.startsWith('approve_role_') || id.startsWith('deny_role_')) {
@@ -167,6 +189,11 @@ async function handleButton(interaction) {
   if (id.startsWith('approve_coins_') || id.startsWith('deny_coins_')) {
     const approvalService = require('../services/approvalService');
     return approvalService.handleCoinsApprovalButton(interaction);
+  }
+
+  if (id.startsWith('approve_service_') || id.startsWith('deny_service_')) {
+    const approvalService = require('../services/approvalService');
+    return approvalService.handleServiceApprovalButton(interaction);
   }
 
   if (id.startsWith('trade_accept_direct_') || id.startsWith('trade_accept_role_') || id.startsWith('trade_accept_service_') || id.startsWith('trade_deny_direct_')) {
@@ -181,8 +208,14 @@ async function handleButton(interaction) {
     return pagination.handlePageButton(interaction);
   }
 
-  // Quest ticket: Geschafft
+  // Quest ticket: Geschafft (nur für Admins/Team-Members)
   if (id.startsWith('quest_complete_')) {
+    const { isTeamMember } = require('../utils/permissions');
+
+    if (!await isTeamMember(interaction.member)) {
+      return interaction.reply({ content: '❌ Nur Team-Member können Quests als abgeschlossen markieren.', ephemeral: true });
+    }
+
     const questService = require('../services/questService');
     const { createEmbed, COLORS } = require('../utils/embedBuilder');
     const { formatCoins } = require('../utils/formatters');
@@ -210,8 +243,14 @@ async function handleButton(interaction) {
     }
   }
 
-  // Quest ticket: Nicht geschafft
+  // Quest ticket: Nicht geschafft (nur für Admins/Team-Members)
   if (id.startsWith('quest_fail_')) {
+    const { isTeamMember } = require('../utils/permissions');
+
+    if (!await isTeamMember(interaction.member)) {
+      return interaction.reply({ content: '❌ Nur Team-Member können Quests als fehlgeschlagen markieren.', ephemeral: true });
+    }
+
     const questService = require('../services/questService');
     const { createEmbed, COLORS } = require('../utils/embedBuilder');
     const parts = id.split('_');
@@ -1201,12 +1240,24 @@ async function handleButton(interaction) {
     }).sort({ createdAt: -1 }).limit(25).lean();
 
     if (offers.length === 0) {
+      const userDoc = await User.findOne({ guildId: interaction.guild.id, userId: interaction.user.id });
+      const dmEnabled = !userDoc || userDoc.dmNotifications !== false;
+
       const embed = createEmbed({
         title: '📬 Dein Postfach',
         description: 'Du hast keine offenen Angebote.',
         color: COLORS.MARKET,
+        footer: `DM-Benachrichtigungen: ${dmEnabled ? 'An' : 'Aus'}`,
       });
-      return interaction.reply({ embeds: [embed], ephemeral: true });
+
+      const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+      const muteButton = new ButtonBuilder()
+        .setCustomId('shop_toggle_dm')
+        .setLabel(dmEnabled ? 'DM stumm' : 'DM aktivieren')
+        .setEmoji(dmEnabled ? '🔇' : '🔔')
+        .setStyle(ButtonStyle.Secondary);
+
+      return interaction.reply({ embeds: [embed], components: [new ActionRowBuilder().addComponents(muteButton)], ephemeral: true });
     }
 
     const isRequest = (o) => o.senderRole === 'auftraggeber';
@@ -1441,78 +1492,6 @@ async function handleButton(interaction) {
     return interaction.update({ embeds: [embed], components: [] });
   }
 
-  // Random role buy
-  if (id === 'shop_random_role') {
-    const MarketRole = require('../models/MarketRole');
-    const coinService = require('../services/coinService');
-    const { createEmbed, COLORS } = require('../utils/embedBuilder');
-    const { formatCoins } = require('../utils/formatters');
-    const RANDOM_ROLE_PRICE = 1000;
-
-    try {
-      const balance = await coinService.getBalance(interaction.guild.id, interaction.user.id);
-      if (balance < RANDOM_ROLE_PRICE) {
-        return interaction.reply({ content: `❌ Du brauchst **${formatCoins(RANDOM_ROLE_PRICE)}**, hast aber nur **${formatCoins(balance)}**.`, ephemeral: true });
-      }
-
-      const available = await MarketRole.find({
-        guildId: interaction.guild.id,
-        $expr: { $lt: ['$purchased', '$totalStock'] },
-      }).lean();
-
-      if (available.length === 0) {
-        return interaction.reply({ content: '❌ Keine Rollen verfügbar.', ephemeral: true });
-      }
-
-      const random = available[Math.floor(Math.random() * available.length)];
-      const marketService = require('../services/marketService');
-      const { marketRole, price, roleError } = await marketService.buyRole(
-        interaction.guild.id,
-        interaction.user.id,
-        random.name,
-        interaction.guild,
-        RANDOM_ROLE_PRICE
-      );
-
-      const fields = [
-        { name: 'Rolle', value: marketRole.roleId ? `<@&${marketRole.roleId}>` : marketRole.name, inline: true },
-        { name: 'Preis', value: formatCoins(RANDOM_ROLE_PRICE), inline: true },
-      ];
-      if (roleError) {
-        fields.push({ name: '⚠️ Hinweis', value: `Rolle konnte nicht zugewiesen werden: ${roleError}` });
-      }
-      const embed = createEmbed({
-        title: '🎲 Zufällige Rolle!',
-        color: COLORS.SUCCESS,
-        description: `Du hast eine zufällige Rolle erhalten!`,
-        fields,
-      });
-      return interaction.reply({ embeds: [embed], ephemeral: true });
-    } catch (err) {
-      return interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
-    }
-  }
-
-  // Custom role creation - show modal
-  if (id === 'shop_custom_role') {
-    const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
-    const modal = new ModalBuilder()
-      .setCustomId('modal_custom_role')
-      .setTitle('Rolle selbsterzeugen');
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('name')
-          .setLabel('Rollenname')
-          .setPlaceholder('z.B. Meisterbäcker')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-          .setMaxLength(50)
-      )
-    );
-    return interaction.showModal(modal);
-  }
-
   // Quest claim confirmation
   if (id.startsWith('quest_confirm_claim_')) {
     const questService = require('../services/questService');
@@ -1653,13 +1632,88 @@ async function handleButton(interaction) {
 async function handleSelectMenu(interaction) {
   const id = interaction.customId;
 
-  // Buy role from shop — Bestätigung anzeigen
+  // Buy role from shop — Bestätigung anzeigen, Custom Role Modal öffnen oder Zufällige Rolle
   if (id.startsWith('shop_buy_role_')) {
+    const selectedValue = interaction.values[0];
+
+    // Check if user wants random role
+    if (selectedValue === 'random_role') {
+      const MarketRole = require('../models/MarketRole');
+      const coinService = require('../services/coinService');
+      const { createEmbed, COLORS } = require('../utils/embedBuilder');
+      const { formatCoins } = require('../utils/formatters');
+      const RANDOM_ROLE_PRICE = 1000;
+
+      try {
+        const balance = await coinService.getBalance(interaction.guild.id, interaction.user.id);
+        if (balance < RANDOM_ROLE_PRICE) {
+          return interaction.reply({ content: `❌ Du brauchst **${formatCoins(RANDOM_ROLE_PRICE)}**, hast aber nur **${formatCoins(balance)}**.`, ephemeral: true });
+        }
+
+        const available = await MarketRole.find({
+          guildId: interaction.guild.id,
+          $expr: { $lt: ['$purchased', '$totalStock'] },
+        }).lean();
+
+        if (available.length === 0) {
+          return interaction.reply({ content: '❌ Keine Rollen verfügbar.', ephemeral: true });
+        }
+
+        const random = available[Math.floor(Math.random() * available.length)];
+        const marketService = require('../services/marketService');
+        const { marketRole, price, roleError } = await marketService.buyRole(
+          interaction.guild.id,
+          interaction.user.id,
+          random.name,
+          interaction.guild,
+          RANDOM_ROLE_PRICE
+        );
+
+        const fields = [
+          { name: 'Rolle', value: marketRole.roleId ? `<@&${marketRole.roleId}>` : marketRole.name, inline: true },
+          { name: 'Preis', value: formatCoins(RANDOM_ROLE_PRICE), inline: true },
+        ];
+        if (roleError) {
+          fields.push({ name: '⚠️ Hinweis', value: `Rolle konnte nicht zugewiesen werden: ${roleError}` });
+        }
+        const embed = createEmbed({
+          title: '🎲 Zufällige Rolle!',
+          color: COLORS.SUCCESS,
+          description: `Du hast eine zufällige Rolle erhalten!`,
+          fields,
+        });
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+      } catch (err) {
+        return interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
+      }
+    }
+
+    // Check if user wants to create custom role
+    if (selectedValue === 'create_custom_role') {
+      const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
+      const modal = new ModalBuilder()
+        .setCustomId('modal_custom_role')
+        .setTitle('Rolle selbsterzeugen');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId('name')
+            .setLabel('Rollenname')
+            .setPlaceholder('z.B. Meisterbäcker')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setMaxLength(50)
+        )
+      );
+      return interaction.showModal(modal);
+    }
+
+    // Otherwise, buy existing role
     const MarketRole = require('../models/MarketRole');
     const { createEmbed, COLORS } = require('../utils/embedBuilder');
     const { formatCoins } = require('../utils/formatters');
     const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-    const roleName = interaction.values[0];
+    const roleName = selectedValue;
 
     const role = await MarketRole.findOne({ guildId: interaction.guild.id, name: { $regex: new RegExp(`^${roleName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } }).lean();
     if (!role) {
@@ -1725,11 +1779,51 @@ async function handleSelectMenu(interaction) {
     return;
   }
 
-  // Request service
+  // Request service or create own service
   if (id.startsWith('shop_service_request_')) {
     const Service = require('../models/Service');
     const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
-    const serviceId = interaction.values[0];
+    const selectedValue = interaction.values[0];
+
+    // Check if user wants to create their own service
+    if (selectedValue === 'create_own_service') {
+      const modal = new ModalBuilder()
+        .setCustomId('modal_service_create')
+        .setTitle('Service einreichen');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId('name')
+            .setLabel('Name deines Services')
+            .setPlaceholder('z.B. Logo-Design, Coaching, etc.')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setMaxLength(100)
+        ),
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId('description')
+            .setLabel('Beschreibung')
+            .setPlaceholder('Was bietest du an? Was ist inbegriffen?')
+            .setStyle(TextInputStyle.Paragraph)
+            .setRequired(true)
+            .setMaxLength(500)
+        ),
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId('price')
+            .setLabel('Preis in Coins')
+            .setPlaceholder('z.B. 1000')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setMaxLength(10)
+        )
+      );
+      return interaction.showModal(modal);
+    }
+
+    // Otherwise, request existing service
+    const serviceId = selectedValue;
     const service = await Service.findById(serviceId).lean();
 
     if (!service || !service.isActive) {
@@ -2487,5 +2581,43 @@ async function handleModal(interaction) {
       content: `✅ Ticket für **${service.name}** erstellt: <#${channel.id}>`,
       ephemeral: true,
     });
+  }
+
+  // Service erstellen — User reicht eigenen Service ein (Anfrage an Admins)
+  if (id === 'modal_service_create') {
+    const approvalService = require('../services/approvalService');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const { formatCoins } = require('../utils/formatters');
+    const name = interaction.fields.getTextInputValue('name').trim();
+    const description = interaction.fields.getTextInputValue('description').trim();
+    const priceInput = interaction.fields.getTextInputValue('price').trim();
+    const price = parseInt(priceInput);
+
+    if (isNaN(price) || price <= 0) {
+      return interaction.reply({ content: '❌ Bitte gib einen gültigen Preis ein (positive Zahl).', ephemeral: true });
+    }
+
+    if (price > 100000) {
+      return interaction.reply({ content: '❌ Der Preis darf maximal 100.000 Coins betragen.', ephemeral: true });
+    }
+
+    try {
+      await approvalService.createServiceRequest(interaction, name, description, price);
+
+      const embed = createEmbed({
+        title: '📝 Service-Anfrage gesendet!',
+        color: COLORS.SUCCESS,
+        description: `Deine Anfrage für **${name}** wurde an die Admins gesendet.\n\nDu erhältst eine Benachrichtigung, sobald sie bearbeitet wurde.`,
+        fields: [
+          { name: 'Name', value: name, inline: true },
+          { name: 'Preis', value: formatCoins(price), inline: true },
+        ],
+        footer: 'Die Admins werden deine Anfrage prüfen.',
+      });
+
+      return interaction.reply({ embeds: [embed], ephemeral: true });
+    } catch (err) {
+      return interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
+    }
   }
 }

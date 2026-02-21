@@ -1,5 +1,7 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const OwnRoleRequest = require('../models/OwnRoleRequest');
+const ServiceRequest = require('../models/ServiceRequest');
+const Service = require('../models/Service');
 const GuildConfig = require('../models/GuildConfig');
 const coinService = require('./coinService');
 const xpService = require('./xpService');
@@ -212,4 +214,163 @@ async function handleCoinsApprovalButton(interaction) {
   }
 }
 
-module.exports = { createOwnRoleRequest, handleRoleApprovalButton, handleCoinsApprovalButton };
+async function createServiceRequest(interaction, name, description, price) {
+  const { guild, user } = interaction;
+
+  // Prüfen ob User bereits einen Service mit diesem Namen hat
+  const existingService = await Service.findOne({
+    guildId: guild.id,
+    providerId: user.id,
+    name: name,
+  });
+
+  if (existingService) {
+    throw new Error(`Du hast bereits einen Service mit dem Namen "**${name}**".`);
+  }
+
+  // Prüfen ob es bereits eine pending Anfrage mit diesem Namen gibt
+  const existingRequest = await ServiceRequest.findOne({
+    guildId: guild.id,
+    userId: user.id,
+    name: name,
+    status: 'pending',
+  });
+
+  if (existingRequest) {
+    throw new Error(`Du hast bereits eine laufende Anfrage für "**${name}**".`);
+  }
+
+  const request = await ServiceRequest.create({
+    guildId: guild.id,
+    userId: user.id,
+    name,
+    description,
+    price,
+  });
+
+  const config = await GuildConfig.findOne({ guildId: guild.id });
+  const channelId = config?.approvalChannelId;
+  if (!channelId) {
+    throw new Error('Kein Genehmigungskanal konfiguriert. Bitte einen Admin kontaktieren.');
+  }
+
+  const channel = await guild.channels.fetch(channelId).catch(() => null);
+  if (!channel) {
+    throw new Error('Genehmigungskanal nicht gefunden.');
+  }
+
+  const embed = createEmbed({
+    title: '🔧 Service-Anfrage',
+    color: COLORS.WARNING,
+    description: `> ${description}`,
+    fields: [
+      { name: 'Nutzer', value: `<@${user.id}>`, inline: true },
+      { name: 'Service-Name', value: name, inline: true },
+      { name: 'Preis', value: formatCoins(price), inline: true },
+    ],
+    footer: `Anfrage-ID: ${request._id}`,
+  });
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`approve_service_${request._id}`)
+      .setLabel('Genehmigen')
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(`deny_service_${request._id}`)
+      .setLabel('Ablehnen')
+      .setStyle(ButtonStyle.Danger)
+  );
+
+  const msg = await channel.send({ embeds: [embed], components: [row] });
+  request.messageId = msg.id;
+  request.channelId = channel.id;
+  await request.save();
+
+  return request;
+}
+
+async function handleServiceApprovalButton(interaction) {
+  const customId = interaction.customId;
+  const isApprove = customId.startsWith('approve_service_');
+  const requestId = customId.replace(/^(approve|deny)_service_/, '');
+
+  if (!await isTeamMember(interaction.member)) {
+    return interaction.reply({ content: 'Du hast keine Berechtigung dafür.', ephemeral: true });
+  }
+
+  const request = await ServiceRequest.findById(requestId);
+  if (!request) {
+    return interaction.reply({ content: 'Anfrage nicht gefunden.', ephemeral: true });
+  }
+  if (request.status !== 'pending') {
+    return interaction.reply({ content: 'Diese Anfrage wurde bereits bearbeitet.', ephemeral: true });
+  }
+
+  if (isApprove) {
+    try {
+      const service = await Service.create({
+        guildId: request.guildId,
+        name: request.name,
+        description: request.description,
+        price: request.price,
+        providerId: request.userId,
+      });
+
+      request.serviceId = service._id.toString();
+      request.status = 'approved';
+      request.reviewedBy = interaction.user.id;
+      request.reviewedAt = new Date();
+      await request.save();
+
+      const embed = createEmbed({
+        title: '🔧 Service-Anfrage — Genehmigt ✅',
+        color: COLORS.SUCCESS,
+        fields: [
+          { name: 'Nutzer', value: `<@${request.userId}>`, inline: true },
+          { name: 'Service', value: request.name, inline: true },
+          { name: 'Preis', value: formatCoins(request.price), inline: true },
+          { name: 'Genehmigt von', value: `<@${interaction.user.id}>`, inline: true },
+        ],
+      });
+      await interaction.update({ embeds: [embed], components: [] });
+
+      try {
+        const user = await interaction.client.users.fetch(request.userId);
+        await user.send(`Dein Service **${request.name}** wurde genehmigt und ist jetzt im Shop verfügbar! 🎉`);
+      } catch {}
+    } catch (err) {
+      logger.error('Fehler beim Erstellen des Services:', err);
+      return interaction.reply({ content: `❌ Fehler beim Erstellen: ${err.message}`, ephemeral: true });
+    }
+  } else {
+    request.status = 'denied';
+    request.reviewedBy = interaction.user.id;
+    request.reviewedAt = new Date();
+    await request.save();
+
+    const embed = createEmbed({
+      title: '🔧 Service-Anfrage — Abgelehnt ❌',
+      color: COLORS.ERROR,
+      fields: [
+        { name: 'Nutzer', value: `<@${request.userId}>`, inline: true },
+        { name: 'Service', value: request.name, inline: true },
+        { name: 'Abgelehnt von', value: `<@${interaction.user.id}>`, inline: true },
+      ],
+    });
+    await interaction.update({ embeds: [embed], components: [] });
+
+    try {
+      const user = await interaction.client.users.fetch(request.userId);
+      await user.send(`Deine Anfrage für den Service **${request.name}** wurde leider abgelehnt.`);
+    } catch {}
+  }
+}
+
+module.exports = {
+  createOwnRoleRequest,
+  handleRoleApprovalButton,
+  handleCoinsApprovalButton,
+  createServiceRequest,
+  handleServiceApprovalButton,
+};
