@@ -1513,45 +1513,6 @@ async function handleButton(interaction) {
     return interaction.showModal(modal);
   }
 
-  // Custom role creation - modal submit
-  if (id === 'modal_custom_role') {
-    const coinService = require('../services/coinService');
-    const { createEmbed, COLORS } = require('../utils/embedBuilder');
-    const { formatCoins } = require('../utils/formatters');
-    const CUSTOM_ROLE_PRICE = 2500;
-    const rawName = interaction.fields.getTextInputValue('name').trim();
-    const roleName = `*${rawName}`;
-
-    try {
-      const balance = await coinService.getBalance(interaction.guild.id, interaction.user.id);
-      if (balance < CUSTOM_ROLE_PRICE) {
-        return interaction.reply({ content: `❌ Du brauchst **${formatCoins(CUSTOM_ROLE_PRICE)}**, hast aber nur **${formatCoins(balance)}**.`, ephemeral: true });
-      }
-
-      const role = await interaction.guild.roles.create({
-        name: roleName,
-        reason: `Benutzerdefinierte Rolle erstellt von ${interaction.user.tag}`,
-      });
-
-      const member = await interaction.guild.members.fetch(interaction.user.id);
-      await member.roles.add(role);
-
-      await coinService.addCoins(interaction.guild.id, interaction.user.id, -CUSTOM_ROLE_PRICE, 'shop', `Benutzerdefinierte Rolle: ${roleName}`);
-
-      const embed = createEmbed({
-        title: '✨ Rolle erstellt!',
-        color: COLORS.SUCCESS,
-        description: `Du hast die Rolle <@&${role.id}> erstellt und erhalten.`,
-        fields: [
-          { name: 'Preis', value: formatCoins(CUSTOM_ROLE_PRICE), inline: true },
-        ],
-      });
-      return interaction.reply({ embeds: [embed], ephemeral: true });
-    } catch (err) {
-      return interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
-    }
-  }
-
   // Quest claim confirmation
   if (id.startsWith('quest_confirm_claim_')) {
     const questService = require('../services/questService');
@@ -2096,6 +2057,45 @@ async function handleUserSelectMenu(interaction) {
 
 async function handleModal(interaction) {
   const id = interaction.customId;
+
+  // Custom role creation - modal submit
+  if (id === 'modal_custom_role') {
+    const coinService = require('../services/coinService');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const { formatCoins } = require('../utils/formatters');
+    const CUSTOM_ROLE_PRICE = 2500;
+    const rawName = interaction.fields.getTextInputValue('name').trim();
+    const roleName = `*${rawName}`;
+
+    try {
+      const balance = await coinService.getBalance(interaction.guild.id, interaction.user.id);
+      if (balance < CUSTOM_ROLE_PRICE) {
+        return interaction.reply({ content: `❌ Du brauchst **${formatCoins(CUSTOM_ROLE_PRICE)}**, hast aber nur **${formatCoins(balance)}**.`, ephemeral: true });
+      }
+
+      const role = await interaction.guild.roles.create({
+        name: roleName,
+        reason: `Benutzerdefinierte Rolle erstellt von ${interaction.user.tag}`,
+      });
+
+      const member = await interaction.guild.members.fetch(interaction.user.id);
+      await member.roles.add(role);
+
+      await coinService.addCoins(interaction.guild.id, interaction.user.id, -CUSTOM_ROLE_PRICE, 'shop', `Benutzerdefinierte Rolle: ${roleName}`);
+
+      const embed = createEmbed({
+        title: '✨ Rolle erstellt!',
+        color: COLORS.SUCCESS,
+        description: `Du hast die Rolle <@&${role.id}> erstellt und erhalten.`,
+        fields: [
+          { name: 'Preis', value: formatCoins(CUSTOM_ROLE_PRICE), inline: true },
+        ],
+      });
+      return interaction.reply({ embeds: [embed], ephemeral: true });
+    } catch (err) {
+      return interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
+    }
+  }
 
   // Aufleveln
   if (id === 'modal_levelup') {
