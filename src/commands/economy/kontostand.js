@@ -9,7 +9,8 @@ module.exports = {
     .setDescription('Zeigt deinen Kontostand an')
     .addUserOption(opt =>
       opt.setName('nutzer').setDescription('Kontostand eines anderen Nutzers')
-    ),
+    )
+    .setDefaultMemberPermissions(0),
   async execute(interaction) {
     const target = interaction.options.getUser('nutzer') || interaction.user;
     const user = await xpService.getOrCreateUser(interaction.guild.id, target.id);

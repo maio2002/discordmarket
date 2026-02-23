@@ -10,7 +10,8 @@ module.exports = {
     .setDescription('Zeigt deinen Rang und Coins an')
     .addUserOption(opt =>
       opt.setName('nutzer').setDescription('Rang eines anderen Nutzers anzeigen')
-    ),
+    )
+    .setDefaultMemberPermissions(0),
   async execute(interaction) {
     const target = interaction.options.getUser('nutzer') || interaction.user;
     const member = await interaction.guild.members.fetch(target.id).catch(() => null);

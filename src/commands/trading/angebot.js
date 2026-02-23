@@ -39,7 +39,8 @@ module.exports = {
         .addStringOption(opt =>
           opt.setName('id').setDescription('Angebots-ID').setRequired(true)
         )
-    ),
+    )
+    .setDefaultMemberPermissions(0),
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
 

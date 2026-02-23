@@ -10,7 +10,8 @@ module.exports = {
     .setDescription('Zeigt die Server-Rangliste an')
     .addIntegerOption(opt =>
       opt.setName('seite').setDescription('Seite der Rangliste').setMinValue(1)
-    ),
+    )
+    .setDefaultMemberPermissions(0),
   async execute(interaction) {
     const page = interaction.options.getInteger('seite') || 1;
     const { users, total, totalPages } = await xpService.getLeaderboard(

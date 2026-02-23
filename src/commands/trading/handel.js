@@ -9,7 +9,8 @@ module.exports = {
     .setDescription('Nehme ein Handelsangebot an')
     .addStringOption(opt =>
       opt.setName('id').setDescription('Angebots-ID').setRequired(true)
-    ),
+    )
+    .setDefaultMemberPermissions(0),
   async execute(interaction) {
     const offerId = interaction.options.getString('id');
 

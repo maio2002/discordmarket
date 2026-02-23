@@ -7,7 +7,8 @@ const xpService = require('../../services/xpService');
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('xpinfo')
-    .setDescription('Erklärt das Rang- und Coin-System'),
+    .setDescription('Erklärt das Rang- und Coin-System')
+    .setDefaultMemberPermissions(0),
   async execute(interaction) {
     const rankDisplays = await xpService.getAllRankDisplays(interaction.guild.id);
     const rankList = LEVEL.RANKS.map((r, i) =>

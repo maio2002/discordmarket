@@ -7,7 +7,8 @@ const xpService = require('../../services/xpService');
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('shop')
-    .setDescription('Öffnet den Shop mit allen Kategorien'),
+    .setDescription('Öffnet den Shop mit allen Kategorien')
+    .setDefaultMemberPermissions(0),
   async execute(interaction) {
     const rankDisplays = await xpService.getAllRankDisplays(interaction.guild.id);
     const rankList = LEVEL.RANKS.map((r, i) =>

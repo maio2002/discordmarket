@@ -4,7 +4,7 @@ const User = require('../models/User');
 
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
-async function sendDmNotification(client, guildId, targetUserId, message, channelId = null) {
+async function sendDmNotification(client, guildId, targetUserId, message) {
   try {
     const userDoc = await User.findOne({ guildId, userId: targetUserId });
     if (userDoc && userDoc.dmNotifications === false) return;
@@ -12,25 +12,18 @@ async function sendDmNotification(client, guildId, targetUserId, message, channe
 
     const buttons = [];
 
-    // Link zum angegebenen Kanal (z.B. wo die Anfrage kam)
-    if (channelId) {
+    // Link zum Marktkanal
+    const GuildConfig = require('../models/GuildConfig');
+    const config = await GuildConfig.findOne({ guildId });
+    if (config?.marketChannelId) {
       buttons.push(
         new ButtonBuilder()
-          .setURL(`https://discord.com/channels/${guildId}/${channelId}`)
-          .setLabel('Zum Kanal')
-          .setEmoji('🔗')
+          .setURL(`https://discord.com/channels/${guildId}/${config.marketChannelId}`)
+          .setLabel('Zum Postfach')
+          .setEmoji('📬')
           .setStyle(ButtonStyle.Link)
       );
     }
-
-    // Button zum Postfach (Custom ID für DM-Kontext)
-    buttons.push(
-      new ButtonBuilder()
-        .setCustomId(`dm_open_postfach_${guildId}`)
-        .setLabel('Zum Postfach')
-        .setEmoji('📬')
-        .setStyle(ButtonStyle.Primary)
-    );
 
     // Delete-Button (Mülleimer)
     buttons.push(
@@ -741,12 +734,8 @@ async function handleButton(interaction) {
           price: offer.price,
         });
 
-        const targetMemberName = (await interaction.guild.members.fetch(offer.targetId)).displayName;
         await sendDmNotification(interaction.client, offer.guildId, offer.senderId,
-          isRequest
-            ? `✅ **${targetMemberName}** hat deine Coins-Anfrage von **${formatCoins(offer.price)}** akzeptiert.`
-            : `✅ **${targetMemberName}** hat deine Überweisung von **${formatCoins(offer.price)}** angenommen.`,
-          interaction.channelId
+          '💰 Deine Coin-Transaktion wurde abgeschlossen. Für Details siehe Postfach!'
         );
 
         const embed = createEmbed({
@@ -881,12 +870,8 @@ async function handleButton(interaction) {
         price: offer.price,
       });
 
-      const targetName = interaction.user.displayName;
       await sendDmNotification(interaction.client, offer.guildId, offer.senderId,
-        isReq
-          ? `✅ **${targetName}** hat deine Rollenanfrage **${offer.roleName}** akzeptiert.`
-          : `✅ **${targetName}** hat dein Rollenangebot **${offer.roleName}** angenommen.`,
-        interaction.channelId
+        '🏷️ Deine Rollen-Transaktion wurde abgeschlossen. Für Details siehe Postfach!'
       );
 
       const embed = createEmbed({
@@ -934,8 +919,7 @@ async function handleButton(interaction) {
       });
 
       await sendDmNotification(interaction.client, offer.guildId, offer.senderId,
-        `✅ **${interaction.user.displayName}** hat deine Anfrage für **${offer.serviceName}** angenommen.`,
-        interaction.channelId
+        '🔧 Deine Service-Anfrage wurde angenommen. Für Details siehe Postfach!'
       );
 
       const embed = createEmbed({
@@ -999,8 +983,7 @@ async function handleButton(interaction) {
     });
 
     await sendDmNotification(interaction.client, offer.guildId, offer.senderId,
-      notifDesc.replace(/<@\d+>/g, interaction.user.displayName),
-      interaction.channelId
+      '❌ Ein Angebot wurde abgelehnt. Für Details siehe Postfach!'
     );
 
     const embed = createEmbed({
@@ -1092,20 +1075,29 @@ async function handleButton(interaction) {
       const targetId = id.replace('shop_request_role_', '');
       const { ActionRowBuilder: AR, StringSelectMenuBuilder } = require('discord.js');
       const { createEmbed, COLORS } = require('../utils/embedBuilder');
+      const GuildConfig = require('../models/GuildConfig');
+
+      // Lade Rang-Rollen aus Config
+      const config = await GuildConfig.findOne({ guildId: interaction.guild.id });
+      const rankRoleIds = config?.rankRoleIds || [];
 
       const member = await interaction.guild.members.fetch(targetId);
       const userRoles = member.roles.cache
-        .filter(r => r.id !== interaction.guild.id && !r.managed)
+        .filter(r =>
+          r.id !== interaction.guild.id &&
+          !r.managed &&
+          !rankRoleIds.includes(r.id) // Rang-Rollen ausfiltern
+        )
         .sort((a, b) => b.position - a.position)
         .first(25);
 
       if (userRoles.length === 0) {
-        return interaction.reply({ content: '❌ Dieser User besitzt keine Rollen, die du anfragen kannst.', ephemeral: true });
+        return interaction.reply({ content: '❌ Dieser User besitzt keine Rollen, die du anfragen kannst. (Rang-Rollen können nicht gehandelt werden)', ephemeral: true });
       }
 
       const embed = createEmbed({
         title: '🏷️ Rolle anfragen',
-        description: `Wähle eine Rolle von <@${targetId}> aus, die du anfragen möchtest.`,
+        description: `Wähle eine Rolle von <@${targetId}> aus, die du anfragen möchtest.\n\n*Rang-Rollen können nicht gehandelt werden.*`,
         color: COLORS.MARKET,
       });
       const selectMenu = new StringSelectMenuBuilder()
@@ -1197,21 +1189,30 @@ async function handleButton(interaction) {
   if (id.startsWith('shop_send_role_')) {
     const { ActionRowBuilder, StringSelectMenuBuilder } = require('discord.js');
     const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const GuildConfig = require('../models/GuildConfig');
     const targetId = id.replace('shop_send_role_', '');
+
+    // Lade Rang-Rollen aus Config
+    const config = await GuildConfig.findOne({ guildId: interaction.guild.id });
+    const rankRoleIds = config?.rankRoleIds || [];
 
     const member = await interaction.guild.members.fetch(interaction.user.id);
     const userRoles = member.roles.cache
-      .filter(r => r.id !== interaction.guild.id && !r.managed)
+      .filter(r =>
+        r.id !== interaction.guild.id &&
+        !r.managed &&
+        !rankRoleIds.includes(r.id) // Rang-Rollen ausfiltern
+      )
       .sort((a, b) => b.position - a.position)
       .first(25);
 
     if (userRoles.length === 0) {
-      return interaction.reply({ content: '❌ Du besitzt keine Rollen, die du anbieten kannst.', ephemeral: true });
+      return interaction.reply({ content: '❌ Du besitzt keine Rollen, die du anbieten kannst. (Rang-Rollen können nicht gehandelt werden)', ephemeral: true });
     }
 
     const embed = createEmbed({
       title: '🏷️ Rolle anbieten',
-      description: 'Wähle eine deiner Rollen aus, die du anbieten möchtest.',
+      description: 'Wähle eine deiner Rollen aus, die du anbieten möchtest.\n\n*Rang-Rollen können nicht gehandelt werden.*',
       color: COLORS.MARKET,
     });
     const selectMenu = new StringSelectMenuBuilder()
@@ -2161,6 +2162,26 @@ async function handleModal(interaction) {
     const rawName = interaction.fields.getTextInputValue('name').trim();
     const roleName = `*${rawName}`;
 
+    // Profanity blacklist
+    const blacklist = [
+      'nigger', 'neger', 'nigga', 'n1gger', 'n1gga',
+      'hitler', 'nazi', 'heil',
+      'fuck', 'scheiße', 'scheisse', 'fotze', 'hurensohn',
+      'arschloch', 'wichser', 'bastard',
+      'schwuchtel', 'transe',
+      'spast', 'mongo', 'behinderter',
+    ];
+
+    const lowerName = rawName.toLowerCase();
+    const containsBlacklisted = blacklist.some(word => lowerName.includes(word));
+
+    if (containsBlacklisted) {
+      return interaction.reply({
+        content: '❌ Dieser Rollenname enthält unangemessene Begriffe und ist nicht erlaubt.',
+        ephemeral: true,
+      });
+    }
+
     try {
       const balance = await coinService.getBalance(interaction.guild.id, interaction.user.id);
       if (balance < CUSTOM_ROLE_PRICE) {
@@ -2298,8 +2319,7 @@ async function handleModal(interaction) {
     });
 
     await sendDmNotification(interaction.client, interaction.guild.id, targetId,
-      `📬 **${interaction.user.displayName}** fordert **${formatCoins(amount)}** von dir. Schau in dein Postfach!`,
-      interaction.channelId
+      '📬 Du hast eine neue Coin-Anfrage erhalten. Für Details siehe Postfach!'
     );
 
     const msgInfo = message ? `\n> 💬 "${message}"` : '';
@@ -2335,8 +2355,7 @@ async function handleModal(interaction) {
     });
 
     await sendDmNotification(interaction.client, interaction.guild.id, targetId,
-      `📬 **${interaction.user.displayName}** möchte dich beauftragen. Schau in dein Postfach!`,
-      interaction.channelId
+      '📬 Du hast eine neue Auftragsanfrage erhalten. Für Details siehe Postfach!'
     );
 
     const embed = createEmbed({
@@ -2360,48 +2379,58 @@ async function handleModal(interaction) {
     const { createEmbed, COLORS } = require('../utils/embedBuilder');
     const { formatCoins } = require('../utils/formatters');
     const targetId = id.replace('modal_send_coins_', '');
-    const amount = parseInt(interaction.fields.getTextInputValue('amount'));
-    const message = interaction.fields.getTextInputValue('message') || '';
+
+    let amount, message;
+    try {
+      amount = parseInt(interaction.fields.getTextInputValue('amount'));
+      message = interaction.fields.getTextInputValue('message')?.trim() || '';
+    } catch (err) {
+      return interaction.reply({ content: '❌ Fehler beim Lesen der Formulardaten.', ephemeral: true });
+    }
 
     if (isNaN(amount) || amount <= 0) {
       return interaction.reply({ content: '❌ Bitte gib einen gültigen Betrag ein.', ephemeral: true });
     }
 
-    // Prüfen ob der Sender genug Coins hat
-    const sender = await coinService.getBalance(interaction.guild.id, interaction.user.id);
-    if (sender < amount) {
-      return interaction.reply({ content: `❌ Du hast nicht genug Coins. Dein Guthaben: ${formatCoins(sender)}`, ephemeral: true });
+    try {
+      // Prüfen ob der Sender genug Coins hat
+      const sender = await coinService.getBalance(interaction.guild.id, interaction.user.id);
+      if (sender < amount) {
+        return interaction.reply({ content: `❌ Du hast nicht genug Coins. Dein Guthaben: ${formatCoins(sender)}`, ephemeral: true });
+      }
+
+      // Coins vom Sender abziehen (reservieren)
+      await coinService.addCoins(interaction.guild.id, interaction.user.id, -amount, 'trade', `Coins reserviert für <@${targetId}>`);
+
+      await Offer.create({
+        guildId: interaction.guild.id,
+        senderId: interaction.user.id,
+        targetId,
+        type: 'coins',
+        price: amount,
+        description: message || null,
+      });
+
+      await sendDmNotification(interaction.client, interaction.guild.id, targetId,
+        '📬 Du hast eine Coin-Überweisung erhalten. Für Details siehe Postfach!'
+      );
+
+      const msgInfo = message ? `\n> 💬 "${message}"` : '';
+      const embed = createEmbed({
+        title: '✅ Coins-Überweisung erstellt!',
+        color: COLORS.SUCCESS,
+        description: `**${formatCoins(amount)}** wurden für <@${targetId}> reserviert.${msgInfo}\n\nDer Empfänger muss die Überweisung im Postfach akzeptieren.`,
+      });
+      return interaction.reply({ embeds: [embed], ephemeral: true });
+    } catch (err) {
+      return interaction.reply({ content: `❌ Fehler: ${err.message}`, ephemeral: true });
     }
-
-    // Coins vom Sender abziehen (reservieren)
-    await coinService.addCoins(interaction.guild.id, interaction.user.id, -amount, 'trade', `Coins reserviert für <@${targetId}>`);
-
-    await Offer.create({
-      guildId: interaction.guild.id,
-      senderId: interaction.user.id,
-      targetId,
-      type: 'coins',
-      price: amount,
-      description: message || null,
-    });
-
-    await sendDmNotification(interaction.client, interaction.guild.id, targetId,
-      `📬 **${interaction.user.displayName}** sendet dir **${formatCoins(amount)}**. Schau in dein Postfach!`,
-      interaction.channelId
-    );
-
-    const msgInfo = message ? `\n> 💬 "${message}"` : '';
-    const embed = createEmbed({
-      title: '✅ Coins-Überweisung erstellt!',
-      color: COLORS.SUCCESS,
-      description: `**${formatCoins(amount)}** wurden für <@${targetId}> reserviert.${msgInfo}\n\nDer Empfänger muss die Überweisung im Postfach akzeptieren.`,
-    });
-    return interaction.reply({ embeds: [embed], ephemeral: true });
   }
 
   // Rolle anbieten
   if (id.startsWith('modal_send_role_')) {
     const Offer = require('../models/Offer');
+    const GuildConfig = require('../models/GuildConfig');
     // Format: modal_send_role_{targetId}_{roleId}
     const parts = id.split('_');
     const targetId = parts[3];
@@ -2417,6 +2446,19 @@ async function handleModal(interaction) {
       return interaction.reply({ content: '❌ Diese Rolle existiert nicht mehr.', ephemeral: true });
     }
 
+    // Prüfen ob es eine Rang-Rolle ist
+    const config = await GuildConfig.findOne({ guildId: interaction.guild.id });
+    const rankRoleIds = config?.rankRoleIds || [];
+    if (rankRoleIds.includes(roleId)) {
+      return interaction.reply({ content: '❌ Rang-Rollen können nicht gehandelt werden.', ephemeral: true });
+    }
+
+    // Prüfen ob User die Rolle besitzt
+    const member = await interaction.guild.members.fetch(interaction.user.id);
+    if (!member.roles.cache.has(roleId)) {
+      return interaction.reply({ content: '❌ Du besitzt diese Rolle nicht.', ephemeral: true });
+    }
+
     await Offer.create({
       guildId: interaction.guild.id,
       senderId: interaction.user.id,
@@ -2428,8 +2470,7 @@ async function handleModal(interaction) {
     });
 
     await sendDmNotification(interaction.client, interaction.guild.id, targetId,
-      `📬 **${interaction.user.displayName}** bietet dir die Rolle **${role.name}** an. Schau in dein Postfach!`,
-      interaction.channelId
+      '📬 Du hast ein neues Rollenangebot erhalten. Für Details siehe Postfach!'
     );
 
     return interaction.reply({
@@ -2441,6 +2482,7 @@ async function handleModal(interaction) {
   // Rolle anfragen
   if (id.startsWith('modal_request_role_')) {
     const Offer = require('../models/Offer');
+    const GuildConfig = require('../models/GuildConfig');
     // Format: modal_request_role_{targetId}_{roleId}
     const parts = id.split('_');
     const targetId = parts[3];
@@ -2456,6 +2498,19 @@ async function handleModal(interaction) {
       return interaction.reply({ content: '❌ Diese Rolle existiert nicht mehr.', ephemeral: true });
     }
 
+    // Prüfen ob es eine Rang-Rolle ist
+    const config = await GuildConfig.findOne({ guildId: interaction.guild.id });
+    const rankRoleIds = config?.rankRoleIds || [];
+    if (rankRoleIds.includes(roleId)) {
+      return interaction.reply({ content: '❌ Rang-Rollen können nicht gehandelt werden.', ephemeral: true });
+    }
+
+    // Prüfen ob Ziel-User die Rolle besitzt
+    const targetMember = await interaction.guild.members.fetch(targetId);
+    if (!targetMember.roles.cache.has(roleId)) {
+      return interaction.reply({ content: '❌ Dieser User besitzt diese Rolle nicht mehr.', ephemeral: true });
+    }
+
     await Offer.create({
       guildId: interaction.guild.id,
       senderId: interaction.user.id,
@@ -2468,8 +2523,7 @@ async function handleModal(interaction) {
     });
 
     await sendDmNotification(interaction.client, interaction.guild.id, targetId,
-      `📬 **${interaction.user.displayName}** möchte deine Rolle **${role.name}** kaufen. Schau in dein Postfach!`,
-      interaction.channelId
+      '📬 Du hast eine neue Rollenanfrage erhalten. Für Details siehe Postfach!'
     );
 
     return interaction.reply({
@@ -2502,8 +2556,7 @@ async function handleModal(interaction) {
     });
 
     await sendDmNotification(interaction.client, interaction.guild.id, targetId,
-      `📬 **${interaction.user.displayName}** bietet dir seine Arbeit an. Schau in dein Postfach!`,
-      interaction.channelId
+      '📬 Du hast ein neues Auftragsangebot erhalten. Für Details siehe Postfach!'
     );
 
     const embed = createEmbed({
@@ -2529,58 +2582,73 @@ async function handleModal(interaction) {
     const serviceId = id.replace('modal_service_request_', '');
     const message = interaction.fields.getTextInputValue('message');
 
-    const service = await Service.findById(serviceId).lean();
-    if (!service || !service.isActive) {
-      return interaction.reply({ content: '❌ Diese Dienstleistung ist nicht mehr verfügbar.', ephemeral: true });
-    }
+    try {
+      const service = await Service.findById(serviceId).lean();
+      if (!service || !service.isActive) {
+        return interaction.reply({ content: '❌ Diese Dienstleistung ist nicht mehr verfügbar.', ephemeral: true });
+      }
 
-    const guild = interaction.guild;
-    const requesterMember = await guild.members.fetch(interaction.user.id);
-    const providerMember = await guild.members.fetch(service.providerId);
-    const requesterName = requesterMember.displayName.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20);
-    const serviceName = service.name.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20);
+      const guild = interaction.guild;
+      const requesterMember = await guild.members.fetch(interaction.user.id);
+      const providerMember = await guild.members.fetch(service.providerId).catch(() => null);
 
-    const channel = await guild.channels.create({
-      name: `service-${serviceName}-${requesterName}`,
-      type: ChannelType.GuildText,
-      permissionOverwrites: [
+      if (!providerMember) {
+        return interaction.reply({ content: '❌ Der Anbieter ist nicht mehr auf dem Server.', ephemeral: true });
+      }
+
+      const requesterName = requesterMember.displayName.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20);
+      const serviceName = service.name.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20);
+
+      const permissionOverwrites = [
         { id: guild.id, type: OverwriteType.Role, deny: [PermissionFlagsBits.ViewChannel] },
         { id: requesterMember.id, type: OverwriteType.Member, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
         { id: providerMember.id, type: OverwriteType.Member, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
-      ],
-    });
+      ];
 
-    const embed = createEmbed({
-      title: `🔧 Dienstleistung: ${service.name}`,
-      description: `${service.description}\n\n**Nachricht von <@${interaction.user.id}>:**\n> ${message}`,
-      color: COLORS.MARKET,
-      fields: [
-        { name: 'Anfrage von', value: `<@${interaction.user.id}>`, inline: true },
-        { name: 'Anbieter', value: `<@${service.providerId}>`, inline: true },
-        { name: 'Preis', value: formatCoins(service.price), inline: true },
-      ],
-      footer: 'Der Anbieter kann die Anfrage annehmen oder ablehnen.',
-    });
+      const channel = await guild.channels.create({
+        name: `service-${serviceName}-${requesterName}`,
+        type: ChannelType.GuildText,
+        permissionOverwrites,
+      });
 
-    const buttons = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`service_accept_${serviceId}_${interaction.user.id}_${channel.id}`)
-        .setLabel('Annehmen')
-        .setEmoji('✅')
-        .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId(`service_deny_${serviceId}_${interaction.user.id}_${channel.id}`)
-        .setLabel('Ablehnen')
-        .setEmoji('❌')
-        .setStyle(ButtonStyle.Danger),
-    );
+      const embed = createEmbed({
+        title: `🔧 Dienstleistung: ${service.name}`,
+        description: `${service.description}\n\n**Nachricht von <@${interaction.user.id}>:**\n> ${message}`,
+        color: COLORS.MARKET,
+        fields: [
+          { name: 'Anfrage von', value: `<@${interaction.user.id}>`, inline: true },
+          { name: 'Anbieter', value: `<@${service.providerId}>`, inline: true },
+          { name: 'Preis', value: formatCoins(service.price), inline: true },
+        ],
+        footer: 'Der Anbieter kann die Anfrage annehmen oder ablehnen.',
+      });
 
-    await channel.send({ content: `<@${interaction.user.id}> <@${service.providerId}>`, embeds: [embed], components: [buttons] });
+      const buttons = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`service_accept_${serviceId}_${interaction.user.id}_${channel.id}`)
+          .setLabel('Annehmen')
+          .setEmoji('✅')
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId(`service_deny_${serviceId}_${interaction.user.id}_${channel.id}`)
+          .setLabel('Ablehnen')
+          .setEmoji('❌')
+          .setStyle(ButtonStyle.Danger),
+      );
 
-    return interaction.reply({
-      content: `✅ Ticket für **${service.name}** erstellt: <#${channel.id}>`,
-      ephemeral: true,
-    });
+      await channel.send({ content: `<@${interaction.user.id}> <@${service.providerId}>`, embeds: [embed], components: [buttons] });
+
+      return interaction.reply({
+        content: `✅ Ticket für **${service.name}** erstellt: <#${channel.id}>`,
+        ephemeral: true,
+      });
+    } catch (err) {
+      logger.error('Service-Anfrage Fehler:', err);
+      const msg = interaction.replied || interaction.deferred
+        ? interaction.followUp({ content: `❌ Fehler beim Erstellen des Tickets: ${err.message}`, ephemeral: true })
+        : interaction.reply({ content: `❌ Fehler beim Erstellen des Tickets: ${err.message}`, ephemeral: true });
+      return msg;
+    }
   }
 
   // Service erstellen — User reicht eigenen Service ein (Anfrage an Admins)

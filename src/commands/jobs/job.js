@@ -13,7 +13,8 @@ module.exports = {
     )
     .addSubcommand(sub =>
       sub.setName('kuendigen').setDescription('Von deinem aktuellen Job zurücktreten')
-    ),
+    )
+    .setDefaultMemberPermissions(0),
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
 

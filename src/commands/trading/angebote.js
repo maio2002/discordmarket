@@ -30,7 +30,8 @@ module.exports = {
     )
     .addIntegerOption(opt =>
       opt.setName('seite').setDescription('Seite').setMinValue(1)
-    ),
+    )
+    .setDefaultMemberPermissions(0),
   async execute(interaction) {
     const filter = interaction.options.getString('filter') || 'alle';
     const page = interaction.options.getInteger('seite') || 1;

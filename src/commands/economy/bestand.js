@@ -10,7 +10,8 @@ module.exports = {
     .setDescription('Zeigt den Rollen-Shop an')
     .addIntegerOption(opt =>
       opt.setName('seite').setDescription('Seite des Shops').setMinValue(1)
-    ),
+    )
+    .setDefaultMemberPermissions(0),
   async execute(interaction) {
     const page = interaction.options.getInteger('seite') || 1;
     const { roles, total, totalPages } = await marketService.getShopRoles(

@@ -14,7 +14,8 @@ module.exports = {
         .setDescription('Name der Rolle')
         .setRequired(true)
         .setAutocomplete(true)
-    ),
+    )
+    .setDefaultMemberPermissions(0),
   async autocomplete(interaction) {
     const focused = interaction.options.getFocused().toLowerCase();
     const roles = await MarketRole.find({ guildId: interaction.guild.id }).lean();

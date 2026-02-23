@@ -13,7 +13,8 @@ module.exports = {
     )
     .addStringOption(opt =>
       opt.setName('farbe').setDescription('Hex-Farbcode (z.B. #FF5733)').setRequired(true)
-    ),
+    )
+    .setDefaultMemberPermissions(0),
   async execute(interaction) {
     const name = interaction.options.getString('name');
     const color = interaction.options.getString('farbe');

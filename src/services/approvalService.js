@@ -14,6 +14,23 @@ async function createOwnRoleRequest(interaction, roleName, roleColor) {
   const { guild, user } = interaction;
   const dbUser = await xpService.getOrCreateUser(guild.id, user.id);
 
+  // Profanity blacklist
+  const blacklist = [
+    'nigger', 'neger', 'nigga', 'n1gger', 'n1gga',
+    'hitler', 'nazi', 'heil',
+    'fuck', 'scheiße', 'scheisse', 'fotze', 'hurensohn',
+    'arschloch', 'wichser', 'bastard',
+    'schwuchtel', 'transe',
+    'spast', 'mongo', 'behinderter',
+  ];
+
+  const lowerName = roleName.toLowerCase();
+  const containsBlacklisted = blacklist.some(word => lowerName.includes(word));
+
+  if (containsBlacklisted) {
+    throw new Error('Dieser Rollenname enthält unangemessene Begriffe und ist nicht erlaubt.');
+  }
+
   const cost = 2250 + (dbUser.ownRoleCount * 1000);
 
   if (dbUser.coins < cost) {

@@ -6,7 +6,8 @@ const { formatCoins } = require('../../utils/formatters');
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('meineangebote')
-    .setDescription('Zeigt deine aktiven Angebote'),
+    .setDescription('Zeigt deine aktiven Angebote')
+    .setDefaultMemberPermissions(0),
   async execute(interaction) {
     const offers = await tradeService.getUserOffers(
       interaction.guild.id,

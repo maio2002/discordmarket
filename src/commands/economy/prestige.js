@@ -15,7 +15,8 @@ module.exports = {
         .setDescription('Name der Prestige-Rolle')
         .setRequired(true)
         .setAutocomplete(true)
-    ),
+    )
+    .setDefaultMemberPermissions(0),
   async autocomplete(interaction) {
     const focused = interaction.options.getFocused().toLowerCase();
     const roles = await MarketRole.find({ guildId: interaction.guild.id, isPrestige: true }).lean();

@@ -12,7 +12,8 @@ module.exports = {
     )
     .addSubcommand(sub =>
       sub.setName('beenden').setDescription('Beende deine Speaker-Session')
-    ),
+    )
+    .setDefaultMemberPermissions(0),
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
 
