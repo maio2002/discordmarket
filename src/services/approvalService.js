@@ -8,6 +8,7 @@ const xpService = require('./xpService');
 const { createEmbed, COLORS } = require('../utils/embedBuilder');
 const { formatCoins } = require('../utils/formatters');
 const { isTeamMember } = require('../utils/permissions');
+const { sendDmNotification } = require('../utils/dmNotification');
 const logger = require('../utils/logger');
 
 async function createOwnRoleRequest(interaction, roleName, roleColor) {
@@ -148,10 +149,9 @@ async function handleRoleApprovalButton(interaction) {
     });
     await interaction.update({ embeds: [embed], components: [] });
 
-    try {
-      const user = await interaction.client.users.fetch(request.userId);
-      await user.send(`Deine eigene Rolle **${request.roleName}** wurde genehmigt! 🎉`);
-    } catch {}
+    await sendDmNotification(interaction.client, request.guildId, request.userId,
+      `✅ Deine eigene Rolle wurde genehmigt! Für Details sieh im Postfach nach.`
+    );
   } else {
     request.status = 'denied';
     request.reviewedBy = interaction.user.id;
@@ -169,10 +169,9 @@ async function handleRoleApprovalButton(interaction) {
     });
     await interaction.update({ embeds: [embed], components: [] });
 
-    try {
-      const user = await interaction.client.users.fetch(request.userId);
-      await user.send(`Deine Anfrage für die Rolle **${request.roleName}** wurde leider abgelehnt.`);
-    } catch {}
+    await sendDmNotification(interaction.client, request.guildId, request.userId,
+      `❌ Deine Rollenanfrage wurde abgelehnt. Für Details sieh im Postfach nach.`
+    );
   }
 }
 
@@ -212,6 +211,9 @@ async function handleCoinsApprovalButton(interaction) {
         ],
       });
       await interaction.update({ embeds: [embed], components: [] });
+      await sendDmNotification(interaction.client, data.guildId, data.targetId,
+        `💰 Du hast Coins erhalten. Für Details sieh im Postfach nach.`
+      );
     } catch (err) {
       await interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
     }
@@ -228,6 +230,9 @@ async function handleCoinsApprovalButton(interaction) {
       ],
     });
     await interaction.update({ embeds: [embed], components: [] });
+    await sendDmNotification(interaction.client, data.guildId, data.targetId,
+      `❌ Eine Coin-Vergabe wurde abgelehnt. Für Details sieh im Postfach nach.`
+    );
   }
 }
 
@@ -352,10 +357,9 @@ async function handleServiceApprovalButton(interaction) {
       });
       await interaction.update({ embeds: [embed], components: [] });
 
-      try {
-        const user = await interaction.client.users.fetch(request.userId);
-        await user.send(`Dein Service **${request.name}** wurde genehmigt und ist jetzt im Shop verfügbar! 🎉`);
-      } catch {}
+      await sendDmNotification(interaction.client, request.guildId, request.userId,
+        `✅ Dein Service wurde genehmigt und ist jetzt im Shop verfügbar! Für Details sieh im Postfach nach.`
+      );
     } catch (err) {
       logger.error('Fehler beim Erstellen des Services:', err);
       return interaction.reply({ content: `❌ Fehler beim Erstellen: ${err.message}`, ephemeral: true });
@@ -377,10 +381,9 @@ async function handleServiceApprovalButton(interaction) {
     });
     await interaction.update({ embeds: [embed], components: [] });
 
-    try {
-      const user = await interaction.client.users.fetch(request.userId);
-      await user.send(`Deine Anfrage für den Service **${request.name}** wurde leider abgelehnt.`);
-    } catch {}
+    await sendDmNotification(interaction.client, request.guildId, request.userId,
+      `❌ Deine Service-Anfrage wurde abgelehnt. Für Details sieh im Postfach nach.`
+    );
   }
 }
 

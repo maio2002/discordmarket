@@ -9,10 +9,11 @@ const questSchema = new mongoose.Schema({
   createdBy:   { type: String, required: true },
   status:      { type: String, enum: ['open', 'completed', 'cancelled'], default: 'open' },
   participants: [{
-    userId:    { type: String, required: true },
-    channelId: { type: String, default: null },
-    completed: { type: Boolean, default: false },
-    joinedAt:  { type: Date, default: Date.now },
+    userId:      { type: String, required: true },
+    channelId:   { type: String, default: null },
+    completed:   { type: Boolean, default: false },
+    joinedAt:    { type: Date, default: Date.now },
+    lastQuizAt:  { type: Date, default: null },
   }],
   examinerId:  { type: String, default: null },
 }, { timestamps: true });

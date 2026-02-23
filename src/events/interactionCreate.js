@@ -3,43 +3,7 @@ const logger = require('../utils/logger');
 const User = require('../models/User');
 
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-
-async function sendDmNotification(client, guildId, targetUserId, message) {
-  try {
-    const userDoc = await User.findOne({ guildId, userId: targetUserId });
-    if (userDoc && userDoc.dmNotifications === false) return;
-    const user = await client.users.fetch(targetUserId);
-
-    const buttons = [];
-
-    // Link zum Marktkanal
-    const GuildConfig = require('../models/GuildConfig');
-    const config = await GuildConfig.findOne({ guildId });
-    if (config?.marketChannelId) {
-      buttons.push(
-        new ButtonBuilder()
-          .setURL(`https://discord.com/channels/${guildId}/${config.marketChannelId}`)
-          .setLabel('Zum Postfach')
-          .setEmoji('📬')
-          .setStyle(ButtonStyle.Link)
-      );
-    }
-
-    // Delete-Button (Mülleimer)
-    buttons.push(
-      new ButtonBuilder()
-        .setCustomId('dm_delete')
-        .setLabel('Löschen')
-        .setEmoji('🗑️')
-        .setStyle(ButtonStyle.Secondary)
-    );
-
-    const row = new ActionRowBuilder().addComponents(buttons);
-    await user.send({ content: message, components: [row] });
-  } catch (err) {
-    // DMs können deaktiviert sein — ignorieren
-  }
-}
+const { sendDmNotification } = require('../utils/dmNotification');
 
 // Sendet eine Quiz-Frage mit Live-Countdown und automatischem Timeout
 async function sendQuizQuestion(session, channel, quizService) {
@@ -331,13 +295,32 @@ async function handleButton(interaction) {
     }
 
     const quizService = require('../services/quizService');
+    const Quest = require('../models/Quest');
     const parts = id.split('_');
     const questId = parts[2];
     const userId = parts[3];
 
+    // Cooldown-Check: 1 Tag pro Ticketkanal
+    const COOLDOWN_MS = 24 * 60 * 60 * 1000;
+    const quest = await Quest.findById(questId);
+    if (quest) {
+      const participant = quest.participants.find(p => p.userId === userId);
+      if (participant?.lastQuizAt) {
+        const elapsed = Date.now() - new Date(participant.lastQuizAt).getTime();
+        if (elapsed < COOLDOWN_MS) {
+          const remaining = COOLDOWN_MS - elapsed;
+          const hours   = Math.floor(remaining / (60 * 60 * 1000));
+          const minutes = Math.floor((remaining % (60 * 60 * 1000)) / (60 * 1000));
+          return interaction.editReply({
+            content: `⏳ <@${userId}> hat vor Kurzem ein Quiz gemacht.\nCooldown: noch **${hours}h ${minutes}m**.`,
+          });
+        }
+      }
+    }
+
     const selectRow = await quizService.buildQuizSelectMenu(interaction.guild.id, questId, userId);
     if (!selectRow) {
-      return interaction.editReply({ content: '❌ Keine Quizzes vorhanden. Erstelle zuerst eines mit `/quiz-erstellen`.' });
+      return interaction.editReply({ content: '❌ Keine Quizzes vorhanden. Erstelle zuerst eines mit `/quiz-generieren`.' });
     }
 
     return interaction.editReply({
@@ -349,6 +332,7 @@ async function handleButton(interaction) {
   // User startet das freigegebene Quiz
   if (id.startsWith('quiz_begin_')) {
     const quizService = require('../services/quizService');
+    const Quest = require('../models/Quest');
     const channelId = id.replace('quiz_begin_', '');
     const session = quizService.getSession(channelId);
 
@@ -358,6 +342,12 @@ async function handleButton(interaction) {
     if (interaction.user.id !== session.userId) {
       return interaction.reply({ content: '❌ Dieses Quiz ist nicht für dich.', ephemeral: true });
     }
+
+    // lastQuizAt setzen
+    await Quest.updateOne(
+      { _id: session.questId, 'participants.userId': session.userId },
+      { $set: { 'participants.$.lastQuizAt': new Date() } }
+    ).catch(() => {});
 
     await interaction.update({ content: '▶️ Quiz gestartet!', components: [] });
     await sendQuizQuestion(session, interaction.channel, quizService);
@@ -1406,26 +1396,24 @@ async function handleButton(interaction) {
       }
       if (o.type === 'role') {
         if (isRequest(o)) {
-          return `**${i + 1}.** 📥 Rollenanfrage: **${o.roleName}**\n> <@${o.senderId}> möchte deine Rolle für ${formatCoins(o.price || 0)} kaufen`;
+          return `**${i + 1}.** 🏷️ Rollenanfrage von <@${o.senderId}>`;
         }
-        return `**${i + 1}.** 🏷️ Rollenangebot: **${o.roleName}**\n> <@${o.senderId}> bietet dir die Rolle für ${formatCoins(o.price || 0)} an`;
+        return `**${i + 1}.** 🏷️ Rollenangebot von <@${o.senderId}>`;
       }
       if (o.type === 'service') {
-        return `**${i + 1}.** 🔧 Service-Anfrage: **${o.serviceName}**\n> Von: <@${o.senderId}> • ${formatCoins(o.price || 0)}\n> ${(o.description || '').slice(0, 80)}`;
+        return `**${i + 1}.** 🔧 Service-Anfrage von <@${o.senderId}>`;
       }
       if (o.type === 'offer') {
         if (isRequest(o)) {
-          return `**${i + 1}.** 📥 Auftragsanfrage von <@${o.senderId}>\n> ${o.description}\n> 💰 ${formatCoins(o.price || 0)} • Du wärst Auftragnehmer`;
+          return `**${i + 1}.** 📥 Auftragsanfrage von <@${o.senderId}>`;
         }
-        return `**${i + 1}.** 📋 Auftragsangebot von <@${o.senderId}>\n> ${o.description}\n> 💰 ${formatCoins(o.price || 0)} • Du wärst Auftraggeber`;
+        return `**${i + 1}.** 📋 Auftragsangebot von <@${o.senderId}>`;
       }
       // Coins
       if (isRequest(o)) {
-        const msg = o.description ? `\n> 💬 "${o.description}"` : '';
-        return `**${i + 1}.** 📥 <@${o.senderId}> fordert ${formatCoins(o.price || 0)} von dir${msg}`;
+        return `**${i + 1}.** 💰 Coin-Anfrage von <@${o.senderId}>`;
       }
-      const msg = o.description ? `\n> 💬 "${o.description}"` : '';
-      return `**${i + 1}.** 💰 <@${o.senderId}> sendet dir ${formatCoins(o.price || 0)}${msg}`;
+      return `**${i + 1}.** 💰 Coin-Überweisung von <@${o.senderId}>`;
     });
 
     // Benachrichtigungen automatisch als gelesen markieren
