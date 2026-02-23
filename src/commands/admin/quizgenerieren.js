@@ -3,7 +3,7 @@ const OpenAI = require('openai');
 const Quiz = require('../../models/Quiz');
 const { createEmbed, COLORS } = require('../../utils/embedBuilder');
 
-const LABELS = ['A', 'B', 'C'];
+const LABELS = ['A', 'B', 'C', 'D'];
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -22,6 +22,15 @@ module.exports = {
         .setMaxValue(10)
     )
     .addStringOption(opt =>
+      opt.setName('schwierigkeit')
+        .setDescription('Schwierigkeitsgrad (Standard: Mittel)')
+        .addChoices(
+          { name: '🟢 Leicht',  value: 'leicht' },
+          { name: '🟡 Mittel',  value: 'mittel' },
+          { name: '🔴 Schwer',  value: 'schwer' },
+        )
+    )
+    .addStringOption(opt =>
       opt.setName('titel')
         .setDescription('Quiz-Name (optional — Standard: Thema wird verwendet)')
         .setMaxLength(80)
@@ -31,9 +40,16 @@ module.exports = {
   async execute(interaction) {
     await interaction.deferReply({ ephemeral: true });
 
-    const thema  = interaction.options.getString('thema');
-    const anzahl = interaction.options.getInteger('anzahl') ?? 5;
-    const titel  = (interaction.options.getString('titel') ?? thema).slice(0, 80);
+    const thema          = interaction.options.getString('thema');
+    const anzahl         = interaction.options.getInteger('anzahl') ?? 5;
+    const schwierigkeit  = interaction.options.getString('schwierigkeit') ?? 'mittel';
+    const titel          = (interaction.options.getString('titel') ?? thema).slice(0, 80);
+
+    const schwierigkeitMap = {
+      leicht: 'leicht (einfache, allgemein bekannte Fakten, klare Antworten)',
+      mittel: 'mittel (etwas Hintergrundwissen nötig, aber keine Expertenkenntnisse)',
+      schwer: 'schwer (Expertenwissen, Details, weniger bekannte Fakten)',
+    };
 
     if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY === 'sk-...') {
       return interaction.editReply({ content: '❌ Kein OpenAI API-Key konfiguriert. Bitte `OPENAI_API_KEY` in der `.env` setzen.' });
@@ -44,7 +60,8 @@ module.exports = {
       return interaction.editReply({ content: `❌ Ein Quiz mit dem Namen **${titel}** existiert bereits. Wähle einen anderen Titel mit \`/quiz-generieren ... titel:...\`.` });
     }
 
-    await interaction.editReply({ content: `⏳ Generiere ${anzahl} Fragen zum Thema **${thema}**…` });
+    const schwierigkeitLabel = { leicht: '🟢 Leicht', mittel: '🟡 Mittel', schwer: '🔴 Schwer' }[schwierigkeit];
+    await interaction.editReply({ content: `⏳ Generiere ${anzahl} Fragen zum Thema **${thema}** (${schwierigkeitLabel})…` });
 
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -60,12 +77,12 @@ module.exports = {
           {
             role: 'user',
             content:
-              `Erstelle ${anzahl} Multiple-Choice-Fragen auf Deutsch zum Thema "${thema}".\n\n` +
+              `Erstelle ${anzahl} Multiple-Choice-Fragen auf Deutsch zum Thema "${thema}".\nSchwierigkeitsgrad: ${schwierigkeitMap[schwierigkeit]}\n\n` +
               `Gib ausschließlich JSON zurück:\n` +
-              `{\n  "questions": [\n    {\n      "question": "Frage?",\n      "options": ["Antwort A", "Antwort B", "Antwort C"],\n      "correctIndex": 0\n    }\n  ]\n}\n\n` +
+              `{\n  "questions": [\n    {\n      "question": "Frage?",\n      "options": ["Antwort A", "Antwort B", "Antwort C", "Antwort D"],\n      "correctIndex": 0\n    }\n  ]\n}\n\n` +
               `Regeln:\n` +
-              `- 2 oder 3 Antwortmöglichkeiten pro Frage\n` +
-              `- correctIndex ist 0-basiert (0=A, 1=B, 2=C)\n` +
+              `- Immer genau 4 Antwortmöglichkeiten pro Frage\n` +
+              `- correctIndex ist 0-basiert (0=A, 1=B, 2=C, 3=D)\n` +
               `- Fragen maximal 200 Zeichen, Antworten maximal 80 Zeichen\n` +
               `- Keine Duplikate, eindeutig richtige Antworten`,
           },
@@ -92,7 +109,7 @@ module.exports = {
       )
       .map(q => ({
         question:     q.question.trim().slice(0, 300),
-        options:      q.options.slice(0, 3).map(o => String(o).trim().slice(0, 100)),
+        options:      q.options.slice(0, 4).map(o => String(o).trim().slice(0, 100)),
         correctIndex: Math.max(0, Math.min(q.correctIndex, q.options.length - 1)),
       }));
 
@@ -123,8 +140,9 @@ module.exports = {
       color: COLORS.SUCCESS,
       description,
       fields: [
-        { name: 'Fragen',  value: `${questions.length}`, inline: true },
-        { name: 'Thema',   value: thema,                 inline: true },
+        { name: 'Fragen',          value: `${questions.length}`,  inline: true },
+        { name: 'Thema',           value: thema,                   inline: true },
+        { name: 'Schwierigkeit',   value: schwierigkeitLabel,      inline: true },
       ],
       footer: 'Gespeichert. Entfernen mit /quiz-entfernen • Fragen ergänzen mit /quiz-frage',
     });
