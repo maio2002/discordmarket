@@ -41,6 +41,56 @@ async function sendDmNotification(client, guildId, targetUserId, message) {
   }
 }
 
+// Sendet eine Quiz-Frage mit Live-Countdown und automatischem Timeout
+async function sendQuizQuestion(session, channel, quizService) {
+  const { LABELS, TIMEOUT_SECONDS } = quizService;
+  const questionIndex = session.currentIndex;
+  let remaining = TIMEOUT_SECONDS;
+
+  const msgData = quizService.buildQuestionMessage(session);
+  msgData.content = `⏰ Noch **${remaining}** Sekunden!`;
+
+  const msg = await channel.send(msgData);
+  session.currentMessage = msg;
+  session.status = 'running';
+
+  // Live-Countdown: jede Sekunde die Nachricht editieren
+  session.intervalId = setInterval(async () => {
+    remaining--;
+    if (remaining > 0) {
+      await msg.edit({ content: `⏰ Noch **${remaining}** Sekunden!` }).catch(() => {});
+    }
+  }, 1000);
+
+  // Nach TIMEOUT_SECONDS automatisch als falsch werten
+  session.timeoutId = setTimeout(async () => {
+    try {
+      if (session.intervalId) { clearInterval(session.intervalId); session.intervalId = null; }
+
+      const current = quizService.getSession(channel.id);
+      if (!current || current.currentIndex !== questionIndex) return;
+
+      await msg.edit({ content: '⏰ **Zeit abgelaufen!**', components: [] }).catch(() => {});
+
+      const q = current.quiz.questions[questionIndex];
+      const { done } = quizService.processAnswer(current, -1);
+
+      await channel.send(`❌ Keine Antwort — die richtige Antwort war **${LABELS[q.correctIndex]}) ${q.options[q.correctIndex]}**.`);
+
+      if (done) {
+        const resultEmbed = quizService.buildResultEmbed(current);
+        quizService.endSession(channel.id);
+        await channel.send({ embeds: [resultEmbed] });
+      } else {
+        await sendQuizQuestion(current, channel, quizService);
+      }
+    } catch (err) {
+      const logger = require('../utils/logger');
+      logger.error('Quiz-Timeout Fehler:', err);
+    }
+  }, TIMEOUT_SECONDS * 1000);
+}
+
 module.exports = {
   name: Events.InteractionCreate,
   once: false,
@@ -268,6 +318,150 @@ async function handleButton(interaction) {
       });
       return interaction.reply({ embeds: [embed], flags: 64 });
     }
+  }
+
+  // "Weitere Frage hinzufügen" nach quiz_erstellen Modal
+  if (id.startsWith('quiz_add_question_')) {
+    const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
+    const quizId = id.replace('quiz_add_question_', '');
+
+    const modal = new ModalBuilder()
+      .setCustomId(`modal_quiz_frage_${quizId}`)
+      .setTitle('Frage hinzufügen');
+
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('question')
+          .setLabel('Frage')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true)
+          .setMaxLength(300)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('option_a')
+          .setLabel('Antwort A')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(100)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('option_b')
+          .setLabel('Antwort B')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(100)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('option_c')
+          .setLabel('Antwort C (optional — leer lassen für nur 2)')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false)
+          .setMaxLength(100)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('correct')
+          .setLabel('Richtige Antwort (A / B / C)')
+          .setPlaceholder('A')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(1)
+      ),
+    );
+
+    return interaction.showModal(modal);
+  }
+
+  // Quiz starten — Quest-User ODER Team-Member dürfen drücken
+  if (id.startsWith('quiz_start_')) {
+    // Nur Team-Member geben das Quiz frei
+    await interaction.deferReply({ ephemeral: true });
+
+    const { isTeamMember } = require('../utils/permissions');
+    if (!await isTeamMember(interaction.member)) {
+      return interaction.editReply({ content: '❌ Nur Team-Member können ein Quiz freigeben.' });
+    }
+
+    const quizService = require('../services/quizService');
+    const parts = id.split('_');
+    const questId = parts[2];
+    const userId = parts[3];
+
+    const selectRow = await quizService.buildQuizSelectMenu(interaction.guild.id, questId, userId);
+    if (!selectRow) {
+      return interaction.editReply({ content: '❌ Keine Quizzes vorhanden. Erstelle zuerst eines mit `/quiz-erstellen`.' });
+    }
+
+    return interaction.editReply({
+      content: '📝 Welches Quiz soll freigegeben werden?',
+      components: [selectRow],
+    });
+  }
+
+  // User startet das freigegebene Quiz
+  if (id.startsWith('quiz_begin_')) {
+    const quizService = require('../services/quizService');
+    const channelId = id.replace('quiz_begin_', '');
+    const session = quizService.getSession(channelId);
+
+    if (!session || session.status !== 'pending') {
+      return interaction.reply({ content: '❌ Kein Quiz bereit oder bereits gestartet.', ephemeral: true });
+    }
+    if (interaction.user.id !== session.userId) {
+      return interaction.reply({ content: '❌ Dieses Quiz ist nicht für dich.', ephemeral: true });
+    }
+
+    await interaction.update({ content: '▶️ Quiz gestartet!', components: [] });
+    await sendQuizQuestion(session, interaction.channel, quizService);
+  }
+
+  // Quiz Antwort verarbeiten
+  if (id.startsWith('quiz_answer_')) {
+    const quizService = require('../services/quizService');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const parts = id.split('_');
+    const questionIndex = parseInt(parts[2]);
+    const answerIndex = parseInt(parts[3]);
+
+    const session = quizService.getSession(interaction.channelId);
+    if (!session) {
+      return interaction.reply({ content: '❌ Keine aktive Quiz-Session in diesem Channel.', ephemeral: true });
+    }
+    if (interaction.user.id !== session.userId) {
+      return interaction.reply({ content: '❌ Dieses Quiz ist nicht für dich.', ephemeral: true });
+    }
+    if (questionIndex !== session.currentIndex) {
+      return interaction.reply({ content: '❌ Diese Frage wurde bereits beantwortet.', ephemeral: true });
+    }
+
+    // Countdown stoppen
+    if (session.intervalId) { clearInterval(session.intervalId); session.intervalId = null; }
+    if (session.timeoutId)  { clearTimeout(session.timeoutId);  session.timeoutId = null; }
+
+    const { correct, done, correctLabel, correctText } = quizService.processAnswer(session, answerIndex);
+
+    const feedbackEmbed = createEmbed({
+      title: correct ? '✅ Richtig!' : '❌ Falsch!',
+      description: correct
+        ? `Die Antwort **${correctLabel}) ${correctText}** ist korrekt.`
+        : `Falsche Antwort. Die richtige Antwort war **${correctLabel}) ${correctText}**.`,
+      color: correct ? COLORS.SUCCESS : COLORS.ERROR,
+    });
+
+    await interaction.update({ content: correct ? '✅ Richtig!' : '❌ Falsch!', components: [] });
+    await interaction.channel.send({ embeds: [feedbackEmbed] });
+
+    if (done) {
+      const resultEmbed = quizService.buildResultEmbed(session);
+      quizService.endSession(interaction.channelId);
+      return interaction.channel.send({ embeds: [resultEmbed] });
+    }
+
+    await sendQuizQuestion(session, interaction.channel, quizService);
   }
 
   // Offer ticket: Abgeschlossen (Auftraggeber)
@@ -1633,6 +1827,49 @@ async function handleButton(interaction) {
 async function handleSelectMenu(interaction) {
   const id = interaction.customId;
 
+  // Quiz auswählen und starten
+  if (id.startsWith('quiz_select_')) {
+    const { isTeamMember } = require('../utils/permissions');
+    if (!await isTeamMember(interaction.member)) {
+      return interaction.reply({ content: '❌ Nur Team-Member können das Quiz auswählen.', ephemeral: true });
+    }
+
+    const quizService = require('../services/quizService');
+    const Quiz = require('../models/Quiz');
+    const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const parts = id.split('_');
+    const questId = parts[2];
+    const userId = parts[3];
+    const quizId = interaction.values[0];
+
+    const quiz = await Quiz.findById(quizId).lean();
+    if (!quiz || quiz.questions.length === 0) {
+      return interaction.reply({ content: '❌ Dieses Quiz hat keine Fragen.', ephemeral: true });
+    }
+
+    // Pending Session anlegen — User muss selbst auf Start drücken
+    quizService.createPendingSession(interaction.channelId, quiz, userId, questId);
+
+    await interaction.update({ content: '✅ Quiz freigegeben!', components: [] });
+
+    const readyEmbed = createEmbed({
+      title: `📝 Quiz bereit — ${quiz.title}`,
+      description: `<@${userId}> drücke auf **Quiz starten** wenn du bereit bist!\n\n> ${quiz.questions.length} Frage(n) • 30 Sekunden pro Frage`,
+      color: COLORS.MARKET,
+    });
+
+    const startBtn = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`quiz_begin_${interaction.channelId}`)
+        .setLabel('Quiz starten')
+        .setEmoji('▶️')
+        .setStyle(ButtonStyle.Success)
+    );
+
+    await interaction.channel.send({ embeds: [readyEmbed], components: [startBtn] });
+  }
+
   // Buy role from shop — Bestätigung anzeigen, Custom Role Modal öffnen oder Zufällige Rolle
   if (id.startsWith('shop_buy_role_')) {
     const selectedValue = interaction.values[0];
@@ -2648,6 +2885,165 @@ async function handleModal(interaction) {
         ? interaction.followUp({ content: `❌ Fehler beim Erstellen des Tickets: ${err.message}`, ephemeral: true })
         : interaction.reply({ content: `❌ Fehler beim Erstellen des Tickets: ${err.message}`, ephemeral: true });
       return msg;
+    }
+  }
+
+  // Quiz erstellen (kombiniertes Modal: Titel + erste Frage)
+  if (id === 'modal_quiz_erstellen') {
+    const Quiz = require('../models/Quiz');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const { ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
+
+    try {
+      const titel        = interaction.fields.getTextInputValue('titel').trim();
+      const question     = interaction.fields.getTextInputValue('question').trim();
+      const optionA      = interaction.fields.getTextInputValue('option_a').trim();
+      const optionB      = interaction.fields.getTextInputValue('option_b').trim();
+      const optionCRaw   = interaction.fields.getTextInputValue('option_c_correct').trim();
+
+      // Parse "option_c_correct" field
+      // Formats: "C: London | Richtig: A"  or  "Richtig: B"
+      let optionC = null;
+      let correctLetter = null;
+
+      const cMatch     = optionCRaw.match(/^C:\s*(.+?)\s*\|\s*Richtig:\s*([ABCabc])\s*$/i);
+      const noC        = optionCRaw.match(/^Richtig:\s*([ABab])\s*$/i);
+
+      if (cMatch) {
+        optionC       = cMatch[1].trim();
+        correctLetter = cMatch[2].toUpperCase();
+      } else if (noC) {
+        correctLetter = noC[1].toUpperCase();
+      } else {
+        // Fallback: try to extract just a letter at the end
+        const fallback = optionCRaw.match(/([ABCabc])\s*$/);
+        if (fallback) {
+          correctLetter = fallback[1].toUpperCase();
+          // Check if there's something before "Richtig:" or similar
+          const cFallback = optionCRaw.match(/^C:\s*(.+)/i);
+          if (cFallback) optionC = cFallback[1].replace(/\|.*$/, '').trim();
+        }
+      }
+
+      if (!correctLetter) {
+        return interaction.reply({
+          content: `❌ Konnte die richtige Antwort nicht lesen.\nFormat: \`Richtig: A\` oder \`C: London | Richtig: A\``,
+          ephemeral: true,
+        });
+      }
+
+      const options = [optionA, optionB];
+      if (optionC) options.push(optionC);
+
+      const labelMap = { A: 0, B: 1, C: 2 };
+      const correctIndex = labelMap[correctLetter];
+
+      if (correctIndex === undefined || correctIndex >= options.length) {
+        return interaction.reply({
+          content: `❌ Richtige Antwort **${correctLetter}** ist ungültig. Gültig: A, B${optionC ? ', C' : ''}.`,
+          ephemeral: true,
+        });
+      }
+
+      const existing = await Quiz.findOne({ guildId: interaction.guild.id, title: titel });
+      if (existing) {
+        return interaction.reply({
+          content: `❌ Ein Quiz mit dem Namen **${titel}** existiert bereits.`,
+          ephemeral: true,
+        });
+      }
+
+      const quiz = await Quiz.create({
+        guildId:    interaction.guild.id,
+        title:      titel,
+        createdBy:  interaction.user.id,
+        questions:  [{ question, options, correctIndex }],
+      });
+
+      const optionLines = options.map((o, i) => {
+        const label = ['A', 'B', 'C'][i];
+        return `${i === correctIndex ? '✅' : '○'} **${label})** ${o}`;
+      }).join('\n');
+
+      const embed = createEmbed({
+        title: `✅ Quiz erstellt — ${quiz.title}`,
+        color: COLORS.SUCCESS,
+        fields: [
+          { name: 'Erste Frage', value: question },
+          { name: 'Antworten',   value: optionLines },
+          { name: 'Tipp',        value: `Weitere Fragen hinzufügen mit \`/quiz-frage titel:${titel}\``, inline: false },
+        ],
+      });
+
+      const addMoreBtn = new ButtonBuilder()
+        .setCustomId(`quiz_add_question_${quiz._id}`)
+        .setLabel('➕ Weitere Frage hinzufügen')
+        .setStyle(ButtonStyle.Primary);
+
+      return interaction.reply({
+        embeds: [embed],
+        components: [new ActionRowBuilder().addComponents(addMoreBtn)],
+        ephemeral: true,
+      });
+    } catch (err) {
+      logger.error('modal_quiz_erstellen Fehler:', err);
+      return interaction.reply({ content: `❌ Fehler: ${err.message}`, ephemeral: true });
+    }
+  }
+
+  // Quiz-Frage hinzufügen
+  if (id.startsWith('modal_quiz_frage_')) {
+    const Quiz = require('../models/Quiz');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const quizId = id.replace('modal_quiz_frage_', '');
+
+    try {
+      const question   = interaction.fields.getTextInputValue('question').trim();
+      const optionA    = interaction.fields.getTextInputValue('option_a').trim();
+      const optionB    = interaction.fields.getTextInputValue('option_b').trim();
+      const optionCRaw = interaction.fields.getTextInputValue('option_c');
+      const optionC    = optionCRaw ? optionCRaw.trim() || null : null;
+      const correctRaw = interaction.fields.getTextInputValue('correct').trim().toUpperCase();
+
+      const options = [optionA, optionB];
+      if (optionC) options.push(optionC);
+
+      const labelMap = { A: 0, B: 1, C: 2 };
+      const correctIndex = labelMap[correctRaw];
+
+      if (correctIndex === undefined || correctIndex >= options.length) {
+        return interaction.reply({
+          content: `❌ Ungültige richtige Antwort: **${correctRaw}**. Gültig: A, B${optionC ? ', C' : ''}.`,
+          ephemeral: true,
+        });
+      }
+
+      const quiz = await Quiz.findById(quizId);
+      if (!quiz) {
+        return interaction.reply({ content: '❌ Quiz nicht gefunden.', ephemeral: true });
+      }
+
+      quiz.questions.push({ question, options, correctIndex });
+      await quiz.save();
+
+      const optionLines = options.map((o, i) => {
+        const label = ['A', 'B', 'C'][i];
+        return `${i === correctIndex ? '✅' : '○'} **${label})** ${o}`;
+      }).join('\n');
+
+      const embed = createEmbed({
+        title: '✅ Frage hinzugefügt!',
+        color: COLORS.SUCCESS,
+        fields: [
+          { name: 'Frage', value: question },
+          { name: 'Antworten', value: optionLines },
+          { name: 'Quiz', value: `**${quiz.title}** (${quiz.questions.length} Fragen gesamt)`, inline: true },
+        ],
+      });
+
+      return interaction.reply({ embeds: [embed], ephemeral: true });
+    } catch (err) {
+      return interaction.reply({ content: `❌ Fehler: ${err.message}`, ephemeral: true });
     }
   }
 

@@ -74,6 +74,11 @@ async function claimQuest(guildId, questId, userId, guild) {
         .setEmoji('✅')
         .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
+        .setCustomId(`quiz_start_${quest._id}_${userId}`)
+        .setLabel('Quiz starten')
+        .setEmoji('📝')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
         .setCustomId(`quest_fail_${quest._id}_${userId}`)
         .setLabel('Nicht geschafft')
         .setEmoji('❌')
