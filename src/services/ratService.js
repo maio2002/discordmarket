@@ -2,6 +2,7 @@ const {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   StringSelectMenuBuilder, EmbedBuilder,
   ModalBuilder, TextInputBuilder, TextInputStyle,
+  ChannelType,
 } = require('discord.js');
 const Proposal = require('../models/Proposal');
 const Constitution = require('../models/Constitution');
@@ -133,6 +134,57 @@ async function updateProposalMessage(proposal, discordGuild) {
   });
 }
 
+// ─── Kanal-Post-Hilfsfunktion (Text & Forum) ─────────────────────────────────
+
+async function postToChannel(channel, { threadName, content, embeds, components }) {
+  if (channel.type === ChannelType.GuildForum) {
+    const thread = await channel.threads.create({
+      name: threadName,
+      message: { content, embeds, components },
+    });
+    // Starter-Nachricht hat dieselbe ID wie der Thread
+    return { channelId: thread.id, messageId: thread.id };
+  }
+  const msg = await channel.send({ content, embeds, components });
+  return { channelId: msg.channelId, messageId: msg.id };
+}
+
+// ─── Auto-Abstimmung bei Thread-Erstellung ────────────────────────────────────
+
+async function handleAutoVoteThread(thread) {
+  const config = await GuildConfig.findOne({ guildId: thread.guildId });
+  if (!config?.serverratChannelId || thread.parentId !== config.serverratChannelId) return;
+
+  // Starter-Nachricht als Antragsinhalt verwenden
+  const starterMsg = await thread.fetchStarterMessage().catch(() => null);
+  const content = starterMsg?.content || '*(kein Text)*';
+
+  // Team des Erstellers suchen (falls Gildenführer)
+  const team = await GuildTeam.findOne({ guildId: thread.guildId, leaderId: thread.ownerId }).catch(() => null);
+
+  const deadline = new Date(Date.now() + SERVERRAT.VOTE_DURATION_HOURS * 3_600_000);
+  const proposal = await Proposal.create({
+    guildId: thread.guildId,
+    title: thread.name,
+    content,
+    type: 'motion',
+    submittedBy: thread.ownerId,
+    teamId: team?._id ?? undefined,
+    deadline,
+  });
+
+  const embed = buildProposalEmbed(proposal, team);
+  const voteMsg = await thread.send({
+    content: `🗳️ **Abstimmung gestartet!** Gildenführer können abstimmen.`,
+    embeds: [embed],
+    components: [buildProposalButtons(proposal._id)],
+  });
+
+  proposal.channelId = thread.id;
+  proposal.messageId = voteMsg.id;
+  await proposal.save();
+}
+
 // ─── Proposals ───────────────────────────────────────────────────────────────
 
 async function handleProposalCreate(interaction) {
@@ -162,9 +214,14 @@ async function handleProposalCreate(interaction) {
   });
 
   const embed = buildProposalEmbed(proposal, team);
-  const msg = await channel.send({ content: `📋 Neuer Antrag von **${team.name}**!`, embeds: [embed], components: [buildProposalButtons(proposal._id)] });
-  proposal.channelId = msg.channelId;
-  proposal.messageId = msg.id;
+  const { channelId, messageId } = await postToChannel(channel, {
+    threadName: title,
+    content: `📋 Neuer Antrag von **${team.name}**!`,
+    embeds: [embed],
+    components: [buildProposalButtons(proposal._id)],
+  });
+  proposal.channelId = channelId;
+  proposal.messageId = messageId;
   await proposal.save();
 
   return interaction.editReply({ content: `✅ Antrag **${title}** wurde im Serverrat eingereicht!` });
@@ -196,7 +253,7 @@ async function handleVote(interaction, vote) {
   const team = await GuildTeam.findOne({ guildId: guild.id, leaderId: user.id });
   if (!team) return interaction.reply({ content: '❌ Nur Gildenführer können abstimmen.', ephemeral: true });
 
-  const already = proposal.votes.find(v => v.teamId.toString() === team._id.toString());
+  const already = proposal.votes.find(v => v.teamId?.toString() === team._id.toString());
   if (already) {
     return interaction.reply({ content: `❌ Deine Gilde hat bereits mit **${already.vote === 'yes' ? 'Ja' : 'Nein'}** gestimmt.`, ephemeral: true });
   }
@@ -367,13 +424,14 @@ async function handleElectionCreate(interaction) {
     guildId: interaction.guild.id, title, roleId: role.id, deadline,
   });
 
-  const msg = await channel.send({
+  const { channelId, messageId } = await postToChannel(channel, {
+    threadName: `🗳️ ${title}`,
     content: `🗳️ **Neue Wahl gestartet!** Kandidiert und stimmt ab!`,
     embeds: [buildElectionEmbed(election)],
     components: [buildElectionButtons(election)],
   });
-  election.channelId = msg.channelId;
-  election.messageId = msg.id;
+  election.channelId = channelId;
+  election.messageId = messageId;
   await election.save();
 
   return interaction.editReply({ content: `✅ Wahl **${title}** gestartet!` });
@@ -494,6 +552,7 @@ async function closeExpiredElections(client) {
 }
 
 module.exports = {
+  handleAutoVoteThread,
   handleProposalCreate,
   handleProposalList,
   handleVote,

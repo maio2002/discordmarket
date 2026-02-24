@@ -57,10 +57,10 @@ module.exports = {
     .addSubcommand(sub =>
       sub
         .setName('serverratkanal')
-        .setDescription('Serverrat-Kanal setzen (für Anträge und Wahlen)')
+        .setDescription('Serverrat-Kanal setzen — Text- oder Forenkanal (für Anträge und Wahlen)')
         .addChannelOption(opt =>
           opt.setName('kanal').setDescription('Der Kanal').setRequired(true)
-            .addChannelTypes(ChannelType.GuildText)
+            .addChannelTypes(ChannelType.GuildText, ChannelType.GuildForum)
         )
     )
     .addSubcommand(sub =>
