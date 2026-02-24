@@ -88,6 +88,23 @@ module.exports = {
           opt.setName('kanal').setDescription('Der Marker-Kanal').setRequired(true)
         )
     )
+    .addSubcommand(sub =>
+      sub
+        .setName('sitzwahlkanal')
+        .setDescription('Kanal für die monatliche Sitzwahl')
+        .addChannelOption(opt =>
+          opt.setName('kanal').setDescription('Der Kanal').setRequired(true)
+            .addChannelTypes(ChannelType.GuildText)
+        )
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName('sitzrolle')
+        .setDescription('Rolle für Ratsabgeordnete (Sitzinhaber)')
+        .addRoleOption(opt =>
+          opt.setName('rolle').setDescription('Die Rolle').setRequired(true)
+        )
+    )
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
@@ -110,6 +127,8 @@ module.exports = {
           { name: 'Verfassungskanal', value: config.verfassungChannelId ? `<#${config.verfassungChannelId}>` : 'Nicht gesetzt', inline: true },
           { name: 'Gilden-Chat-Marker', value: config.gildenChatMarkerChannelId ? `<#${config.gildenChatMarkerChannelId}>` : 'Nicht gesetzt', inline: true },
           { name: 'Gilden-Voice-Marker', value: config.gildenVoiceMarkerChannelId ? `<#${config.gildenVoiceMarkerChannelId}>` : 'Nicht gesetzt', inline: true },
+          { name: 'Sitzwahl-Kanal', value: config.seatElectionChannelId ? `<#${config.seatElectionChannelId}>` : 'Nicht gesetzt', inline: true },
+          { name: 'Sitz-Rolle', value: config.sitzRoleId ? `<@&${config.sitzRoleId}>` : 'Nicht gesetzt', inline: true },
         ],
       });
       return interaction.reply({ embeds: [embed], ephemeral: true });
@@ -133,6 +152,10 @@ module.exports = {
       config.gildenChatMarkerChannelId = interaction.options.getChannel('kanal').id;
     } else if (sub === 'gildenvoicemarker') {
       config.gildenVoiceMarkerChannelId = interaction.options.getChannel('kanal').id;
+    } else if (sub === 'sitzwahlkanal') {
+      config.seatElectionChannelId = interaction.options.getChannel('kanal').id;
+    } else if (sub === 'sitzrolle') {
+      config.sitzRoleId = interaction.options.getRole('rolle').id;
     }
 
     await config.save();

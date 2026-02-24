@@ -35,8 +35,28 @@ function startCronJobs(client) {
     } catch (err) {
       logger.error('Fehler beim Schließen abgelaufener Serverrat-Vorgänge:', err);
     }
+    try {
+      const seatService = require('../services/seatService');
+      await seatService.closeSeatElections(client);
+    } catch (err) {
+      logger.error('Fehler beim Schließen abgelaufener Sitzwahlen:', err);
+    }
   });
   logger.info('Serverrat Auto-Close Cron gestartet (5min Intervall).');
+
+  // Sitzwahl: Am 1. jedes Monats automatisch starten
+  cron.schedule('0 0 1 * *', async () => {
+    const seatService = require('../services/seatService');
+    for (const guild of client.guilds.cache.values()) {
+      try {
+        await seatService.startSeatElection(guild);
+      } catch (err) {
+        logger.warn(`Sitzwahl-Start für ${guild.id} fehlgeschlagen: ${err.message}`);
+      }
+    }
+    logger.info('Monatliche Sitzwahl gestartet.');
+  });
+  logger.info('Sitzwahl-Cron gestartet (1. des Monats).');
 }
 
 module.exports = { startCronJobs };

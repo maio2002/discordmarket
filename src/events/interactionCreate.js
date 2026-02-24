@@ -1815,6 +1815,12 @@ async function handleButton(interaction) {
     const rs = require('../services/ratService');
     return rs.handleElectionVoteButton(interaction);
   }
+
+  // ── Sitzwahl ──────────────────────────────────────────────────────────────
+  if (id.startsWith('seat_vote_')) {
+    const ss = require('../services/seatService');
+    return ss.handleSeatVoteButton(interaction);
+  }
 }
 
 async function handleSelectMenu(interaction) {
@@ -2299,6 +2305,12 @@ async function handleSelectMenu(interaction) {
   if (id.startsWith('el_select_')) {
     const rs = require('../services/ratService');
     return rs.handleElectionVoteSelect(interaction);
+  }
+
+  // ── Sitzwahl Fraktion-Auswahl ─────────────────────────────────────────────
+  if (id.startsWith('seat_select_')) {
+    const ss = require('../services/seatService');
+    return ss.handleSeatVoteSelect(interaction);
   }
 }
 

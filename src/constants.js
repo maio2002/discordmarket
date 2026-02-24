@@ -57,6 +57,10 @@ module.exports = {
     ELECTION_NOMINATION_HOURS: 24,
     ELECTION_VOTE_HOURS: 24,
   },
+  SEATS: {
+    MAX_SEATS:      67,
+    ELECTION_DAYS:  7,   // Wie viele Tage die Wahl läuft
+  },
   GUILD: {
     FOUND_COST: 5000,
     LEVELS: [

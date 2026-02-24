@@ -9,6 +9,9 @@ const guildTeamSchema = new mongoose.Schema({
   level:       { type: Number, default: 0 },
   description: { type: String, default: null },
   foundedAt:   { type: Date, default: Date.now },
+  roleId:        { type: String, default: null },
+  seats:         { type: Number, default: 0 },
+  assignedSeats: { type: [String], default: [] },
   channels: {
     categoryId: { type: String, default: null },
     chatId:     { type: String, default: null },

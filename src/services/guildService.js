@@ -106,10 +106,11 @@ async function getGildenPayload(guildId, userId) {
 // ─── Kanal-Verwaltung ────────────────────────────────────────────────────────
 
 function buildGuildOverwrites(discordGuild, team) {
-  return [
-    { id: discordGuild.id, type: OverwriteType.Role, deny: [PermissionFlagsBits.ViewChannel] },
-    ...team.members.map(id => ({ id, type: OverwriteType.Member, allow: [PermissionFlagsBits.ViewChannel] })),
-  ];
+  const base = [{ id: discordGuild.id, type: OverwriteType.Role, deny: [PermissionFlagsBits.ViewChannel] }];
+  if (team.roleId) {
+    return [...base, { id: team.roleId, type: OverwriteType.Role, allow: [PermissionFlagsBits.ViewChannel] }];
+  }
+  return [...base, ...team.members.map(id => ({ id, type: OverwriteType.Member, allow: [PermissionFlagsBits.ViewChannel] }))];
 }
 
 async function resolveMarker(discordGuild, channelId) {
@@ -198,7 +199,12 @@ async function handleLeave(interaction) {
   }
   team.members = team.members.filter(id => id !== user.id);
   await team.save();
-  syncGuildChannelPerms(guild, team).catch(() => {});
+  if (team.roleId) {
+    const member = await guild.members.fetch(user.id).catch(() => null);
+    if (member) await member.roles.remove(team.roleId).catch(() => {});
+  } else {
+    syncGuildChannelPerms(guild, team).catch(() => {});
+  }
   return interaction.reply({ content: `✅ Du hast die Gilde **${team.name}** verlassen.`, ephemeral: true });
 }
 
@@ -227,6 +233,9 @@ async function handleDisbandExecute(interaction) {
   // Defer vor dem langsamen Kanallöschen
   await interaction.deferUpdate();
   await deleteGuildChannels(guild, team).catch(() => {});
+  if (team.roleId) {
+    await guild.roles.fetch(team.roleId).then(r => r?.delete()).catch(() => {});
+  }
   await GuildTeam.deleteOne({ _id: team._id });
   return interaction.editReply({ content: `💀 Die Gilde **${team.name}** wurde aufgelöst.`, embeds: [], components: [] });
 }
@@ -303,13 +312,24 @@ async function handleCreate(interaction) {
 
   const team = await GuildTeam.create({ guildId: guild.id, name, leaderId: user.id, members: [user.id], description });
 
+  // Gilden-Rolle erstellen
+  try {
+    const role = await guild.roles.create({ name, mentionable: false, reason: `Gilden-Rolle: ${name}` });
+    team.roleId = role.id;
+    const leader = await guild.members.fetch(user.id).catch(() => null);
+    if (leader) await leader.roles.add(role).catch(() => {});
+  } catch (err) {
+    logger.warn(`Gilden-Rolle für "${name}" konnte nicht erstellt werden: ${err.message}`);
+  }
+
   try {
     const channelIds = await createGuildChannels(guild, team);
     team.channels = channelIds;
-    await team.save();
   } catch (err) {
     logger.warn(`Gilden-Kanäle für "${name}" konnten nicht erstellt werden: ${err.message}`);
   }
+
+  await team.save();
 
   const payload = buildGildenEmbed(team);
   return interaction.editReply({ ...payload, content: `✅ Gilde **${name}** gegründet!` });
@@ -356,7 +376,8 @@ async function handleInvite(interaction) {
 
   team.members.push(target.id);
   await team.save();
-  syncGuildChannelPerms(guild, team).catch(() => {});
+  if (team.roleId) await target.roles.add(team.roleId).catch(() => {});
+  else syncGuildChannelPerms(guild, team).catch(() => {});
 
   const payload = buildGildenEmbed(team);
   return interaction.reply({ ...payload, content: `✅ <@${target.id}> wurde eingeladen!`, ephemeral: true });
@@ -373,7 +394,12 @@ async function handleKick(interaction) {
 
   team.members = team.members.filter(id => id !== raw);
   await team.save();
-  syncGuildChannelPerms(guild, team).catch(() => {});
+  if (team.roleId) {
+    const kicked = await guild.members.fetch(raw).catch(() => null);
+    if (kicked) await kicked.roles.remove(team.roleId).catch(() => {});
+  } else {
+    syncGuildChannelPerms(guild, team).catch(() => {});
+  }
 
   const payload = buildGildenEmbed(team);
   return interaction.reply({ ...payload, content: `✅ <@${raw}> wurde entfernt.`, ephemeral: true });

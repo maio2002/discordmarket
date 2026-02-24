@@ -242,7 +242,8 @@ async function handleProposalList(interaction) {
 }
 
 async function handleVote(interaction, vote) {
-  const proposalId = interaction.customId.slice(7); // strip "rp_yes_" or "rp_no_"
+  const prefix = vote === 'yes' ? 'rp_yes_' : 'rp_no_';
+  const proposalId = interaction.customId.slice(prefix.length);
   const { guild, user } = interaction;
 
   const proposal = await Proposal.findById(proposalId);
