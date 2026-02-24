@@ -15,6 +15,7 @@ const guildConfigSchema = new mongoose.Schema({
   messageCooldownSec: { type: Number, default: 30 },
   voiceMinUsers:      { type: Number, default: 2 },
   roleBuyCooldownMin: { type: Number, default: 20 },
+  serverratChannelId: { type: String, default: null },
 });
 
 module.exports = mongoose.model('GuildConfig', guildConfigSchema);

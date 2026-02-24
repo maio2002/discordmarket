@@ -50,6 +50,13 @@ module.exports = {
     mittle_ding: 0.5,
     verkackt: 0,
   },
+  SERVERRAT: {
+    VOTE_DURATION_HOURS: 48,
+    QUORUM: 2,             // Mindestanzahl Gilden-Stimmen für gültiges Ergebnis
+    PASS_THRESHOLD: 0.5,   // >50% Ja-Stimmen = angenommen
+    ELECTION_NOMINATION_HOURS: 24,
+    ELECTION_VOTE_HOURS: 24,
+  },
   GUILD: {
     FOUND_COST: 5000,
     LEVELS: [

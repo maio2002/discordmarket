@@ -1791,6 +1791,30 @@ async function handleButton(interaction) {
   if (id === 'gilden_disband_no') {
     return interaction.update({ content: '❌ Abgebrochen.', embeds: [], components: [] });
   }
+  if (id === 'gilden_manifest') {
+    const gs = require('../services/guildService');
+    return gs.showManifestModal(interaction);
+  }
+
+  // ── Serverrat Abstimmung ───────────────────────────────────────────────────
+  if (id.startsWith('rp_yes_')) {
+    const rs = require('../services/ratService');
+    return rs.handleVote(interaction, 'yes');
+  }
+  if (id.startsWith('rp_no_')) {
+    const rs = require('../services/ratService');
+    return rs.handleVote(interaction, 'no');
+  }
+
+  // ── Wahlen ────────────────────────────────────────────────────────────────
+  if (id.startsWith('el_cand_')) {
+    const rs = require('../services/ratService');
+    return rs.handleCandidacy(interaction);
+  }
+  if (id.startsWith('el_vote_')) {
+    const rs = require('../services/ratService');
+    return rs.handleElectionVoteButton(interaction);
+  }
 }
 
 async function handleSelectMenu(interaction) {
@@ -2269,6 +2293,12 @@ async function handleSelectMenu(interaction) {
       ),
     );
     return interaction.showModal(modal);
+  }
+
+  // ── Wahl Kandidaten-Auswahl ───────────────────────────────────────────────
+  if (id.startsWith('el_select_')) {
+    const rs = require('../services/ratService');
+    return rs.handleElectionVoteSelect(interaction);
   }
 }
 
@@ -2912,5 +2942,9 @@ async function handleModal(interaction) {
   if (id === 'modal_gilden_kick') {
     const gs = require('../services/guildService');
     return gs.handleKick(interaction);
+  }
+  if (id === 'modal_gilden_manifest') {
+    const gs = require('../services/guildService');
+    return gs.handleManifest(interaction);
   }
 }

@@ -1,12 +1,14 @@
 const {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   ModalBuilder, TextInputBuilder, TextInputStyle,
+  ChannelType, OverwriteType, PermissionFlagsBits,
 } = require('discord.js');
 const GuildTeam = require('../models/GuildTeam');
 const coinService = require('./coinService');
 const { createEmbed, COLORS } = require('../utils/embedBuilder');
 const { formatCoins, formatNumber } = require('../utils/formatters');
 const { GUILD } = require('../constants');
+const logger = require('../utils/logger');
 
 const BLACKLIST = [
   'nigger', 'neger', 'nigga', 'hitler', 'nazi', 'heil',
@@ -76,7 +78,11 @@ function buildGildenEmbed(team) {
     new ButtonBuilder().setCustomId('gilden_disband').setLabel('Auflösen').setEmoji('💀').setStyle(ButtonStyle.Danger),
   );
 
-  return { embeds: [embed], components: [row] };
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('gilden_manifest').setLabel('Manifest bearbeiten').setEmoji('📜').setStyle(ButtonStyle.Secondary),
+  );
+
+  return { embeds: [embed], components: [row, row2] };
 }
 
 function buildNoGildePayload() {
@@ -97,6 +103,100 @@ async function getGildenPayload(guildId, userId) {
   return buildGildenEmbed(team);
 }
 
+// ─── Kanal-Verwaltung ────────────────────────────────────────────────────────
+
+async function createGuildChannels(discordGuild, team) {
+  const everyoneDeny = { id: discordGuild.id, type: OverwriteType.Role, deny: [PermissionFlagsBits.ViewChannel] };
+  const memberAllows = team.members.map(id => ({
+    id, type: OverwriteType.Member, allow: [PermissionFlagsBits.ViewChannel],
+  }));
+
+  const category = await discordGuild.channels.create({
+    name: `⚔️ ${team.name}`,
+    type: ChannelType.GuildCategory,
+    permissionOverwrites: [everyoneDeny, ...memberAllows],
+  });
+
+  const chat = await discordGuild.channels.create({
+    name: '💬︱chat',
+    type: ChannelType.GuildText,
+    parent: category.id,
+  });
+
+  // News-Kanal: Mitglieder können lesen, nur Anführer kann schreiben
+  const newsOverwrites = [
+    everyoneDeny,
+    ...team.members.filter(id => id !== team.leaderId).map(id => ({
+      id, type: OverwriteType.Member,
+      allow: [PermissionFlagsBits.ViewChannel],
+      deny: [PermissionFlagsBits.SendMessages],
+    })),
+    { id: team.leaderId, type: OverwriteType.Member, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+  ];
+  const news = await discordGuild.channels.create({
+    name: '📰︱news',
+    type: ChannelType.GuildText,
+    parent: category.id,
+    permissionOverwrites: newsOverwrites,
+  });
+
+  const voice = await discordGuild.channels.create({
+    name: `🔊 ${team.name}`,
+    type: ChannelType.GuildVoice,
+    parent: category.id,
+  });
+
+  return { categoryId: category.id, chatId: chat.id, newsId: news.id, voiceId: voice.id };
+}
+
+async function deleteGuildChannels(discordGuild, team) {
+  const ids = [team.channels?.voiceId, team.channels?.newsId, team.channels?.chatId, team.channels?.categoryId];
+  for (const id of ids) {
+    if (!id) continue;
+    try {
+      const ch = await discordGuild.channels.fetch(id).catch(() => null);
+      if (ch) await ch.delete();
+    } catch (err) {
+      logger.warn(`Gilden-Kanal ${id} konnte nicht gelöscht werden: ${err.message}`);
+    }
+  }
+}
+
+async function syncGuildChannelPerms(discordGuild, team) {
+  if (!team.channels?.categoryId) return;
+
+  const category = await discordGuild.channels.fetch(team.channels.categoryId).catch(() => null);
+  if (!category) return;
+
+  const everyoneDeny = { id: discordGuild.id, type: OverwriteType.Role, deny: [PermissionFlagsBits.ViewChannel] };
+  const memberAllows = team.members.map(id => ({
+    id, type: OverwriteType.Member, allow: [PermissionFlagsBits.ViewChannel],
+  }));
+
+  await category.permissionOverwrites.set([everyoneDeny, ...memberAllows]);
+
+  // Chat und Voice synchronisieren Kategorie-Berechtigungen
+  const chat = team.channels.chatId ? await discordGuild.channels.fetch(team.channels.chatId).catch(() => null) : null;
+  if (chat) await chat.lockPermissions().catch(() => {});
+
+  const voice = team.channels.voiceId ? await discordGuild.channels.fetch(team.channels.voiceId).catch(() => null) : null;
+  if (voice) await voice.lockPermissions().catch(() => {});
+
+  // News-Kanal: individuell setzen
+  const news = team.channels.newsId ? await discordGuild.channels.fetch(team.channels.newsId).catch(() => null) : null;
+  if (news) {
+    await news.permissionOverwrites.set([
+      everyoneDeny,
+      ...team.members.filter(id => id !== team.leaderId).map(id => ({
+        id, type: OverwriteType.Member,
+        allow: [PermissionFlagsBits.ViewChannel],
+        deny: [PermissionFlagsBits.SendMessages],
+      })),
+      { id: team.leaderId, type: OverwriteType.Member, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+    ]).catch(() => {});
+  }
+}
+
 // ─── Button-Handler ───────────────────────────────────────────────────────────
 
 async function handleGildenButton(interaction) {
@@ -113,6 +213,7 @@ async function handleLeave(interaction) {
   }
   team.members = team.members.filter(id => id !== user.id);
   await team.save();
+  syncGuildChannelPerms(guild, team).catch(() => {});
   return interaction.reply({ content: `✅ Du hast die Gilde **${team.name}** verlassen.`, ephemeral: true });
 }
 
@@ -137,8 +238,12 @@ async function handleDisbandExecute(interaction) {
   const { guild, user } = interaction;
   const team = await GuildTeam.findOne({ guildId: guild.id, leaderId: user.id });
   if (!team) return interaction.update({ content: '❌ Gilde nicht gefunden.', embeds: [], components: [] });
+
+  // Defer vor dem langsamen Kanallöschen
+  await interaction.deferUpdate();
+  await deleteGuildChannels(guild, team).catch(() => {});
   await GuildTeam.deleteOne({ _id: team._id });
-  return interaction.update({ content: `💀 Die Gilde **${team.name}** wurde aufgelöst.`, embeds: [], components: [] });
+  return interaction.editReply({ content: `💀 Die Gilde **${team.name}** wurde aufgelöst.`, embeds: [], components: [] });
 }
 
 // ─── Modal anzeigen ───────────────────────────────────────────────────────────
@@ -208,9 +313,21 @@ async function handleCreate(interaction) {
     return interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
   }
 
+  // Defer vor der langsamen Kanalerstellung (verhindert Interaction-Timeout)
+  await interaction.deferReply({ ephemeral: true });
+
   const team = await GuildTeam.create({ guildId: guild.id, name, leaderId: user.id, members: [user.id], description });
+
+  try {
+    const channelIds = await createGuildChannels(guild, team);
+    team.channels = channelIds;
+    await team.save();
+  } catch (err) {
+    logger.warn(`Gilden-Kanäle für "${name}" konnten nicht erstellt werden: ${err.message}`);
+  }
+
   const payload = buildGildenEmbed(team);
-  return interaction.reply({ ...payload, content: `✅ Gilde **${name}** gegründet!`, ephemeral: true });
+  return interaction.editReply({ ...payload, content: `✅ Gilde **${name}** gegründet!` });
 }
 
 async function handleDonate(interaction) {
@@ -254,6 +371,7 @@ async function handleInvite(interaction) {
 
   team.members.push(target.id);
   await team.save();
+  syncGuildChannelPerms(guild, team).catch(() => {});
 
   const payload = buildGildenEmbed(team);
   return interaction.reply({ ...payload, content: `✅ <@${target.id}> wurde eingeladen!`, ephemeral: true });
@@ -270,9 +388,43 @@ async function handleKick(interaction) {
 
   team.members = team.members.filter(id => id !== raw);
   await team.save();
+  syncGuildChannelPerms(guild, team).catch(() => {});
 
   const payload = buildGildenEmbed(team);
   return interaction.reply({ ...payload, content: `✅ <@${raw}> wurde entfernt.`, ephemeral: true });
+}
+
+function showManifestModal(interaction) {
+  const modal = new ModalBuilder().setCustomId('modal_gilden_manifest').setTitle('Manifest bearbeiten');
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('manifest')
+        .setLabel('Manifest / Programm der Gilde')
+        .setStyle(TextInputStyle.Paragraph)
+        .setMaxLength(300)
+        .setRequired(false)
+        .setPlaceholder('Beschreibe die politische Ausrichtung deiner Gilde…'),
+    ),
+  );
+  return interaction.showModal(modal);
+}
+
+async function handleManifest(interaction) {
+  const { guild, user } = interaction;
+  const team = await GuildTeam.findOne({ guildId: guild.id, leaderId: user.id });
+  if (!team) return interaction.reply({ content: '❌ Nur der Anführer kann das Manifest bearbeiten.', ephemeral: true });
+
+  const text = interaction.fields.getTextInputValue('manifest').trim() || null;
+  team.description = text;
+  await team.save();
+
+  const payload = buildGildenEmbed(team);
+  return interaction.reply({
+    ...payload,
+    content: text ? '✅ Manifest aktualisiert.' : '✅ Manifest gelöscht.',
+    ephemeral: true,
+  });
 }
 
 module.exports = {
@@ -289,4 +441,6 @@ module.exports = {
   showDonateModal,
   showInviteModal,
   showKickModal,
+  showManifestModal,
+  handleManifest,
 };

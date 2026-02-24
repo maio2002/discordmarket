@@ -25,6 +25,18 @@ function startCronJobs(client) {
   } catch {
     logger.info('weeklyPayday Cron noch nicht implementiert — übersprungen.');
   }
+
+  // Serverrat: Abgelaufene Anträge und Wahlen alle 5 Minuten schließen
+  cron.schedule('*/5 * * * *', async () => {
+    try {
+      const ratService = require('../services/ratService');
+      await ratService.closeExpiredProposals(client);
+      await ratService.closeExpiredElections(client);
+    } catch (err) {
+      logger.error('Fehler beim Schließen abgelaufener Serverrat-Vorgänge:', err);
+    }
+  });
+  logger.info('Serverrat Auto-Close Cron gestartet (5min Intervall).');
 }
 
 module.exports = { startCronJobs };

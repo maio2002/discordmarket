@@ -9,6 +9,12 @@ const guildTeamSchema = new mongoose.Schema({
   level:       { type: Number, default: 0 },
   description: { type: String, default: null },
   foundedAt:   { type: Date, default: Date.now },
+  channels: {
+    categoryId: { type: String, default: null },
+    chatId:     { type: String, default: null },
+    newsId:     { type: String, default: null },
+    voiceId:    { type: String, default: null },
+  },
 }, { timestamps: true });
 
 guildTeamSchema.index({ guildId: 1, name: 1 }, { unique: true });

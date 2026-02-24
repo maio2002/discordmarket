@@ -54,6 +54,15 @@ module.exports = {
           opt.setName('rolle').setDescription('Die Rolle').setRequired(true)
         )
     )
+    .addSubcommand(sub =>
+      sub
+        .setName('serverratkanal')
+        .setDescription('Serverrat-Kanal setzen (für Anträge und Wahlen)')
+        .addChannelOption(opt =>
+          opt.setName('kanal').setDescription('Der Kanal').setRequired(true)
+            .addChannelTypes(ChannelType.GuildText)
+        )
+    )
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
@@ -72,6 +81,7 @@ module.exports = {
           { name: 'Genehmigungskanal', value: config.approvalChannelId ? `<#${config.approvalChannelId}>` : 'Nicht gesetzt', inline: true },
           { name: 'Member-Rolle', value: config.memberRoleId ? `<@&${config.memberRoleId}>` : 'Nicht gesetzt', inline: true },
           { name: 'VIP-Rolle', value: config.vipRoleId ? `<@&${config.vipRoleId}>` : 'Nicht gesetzt', inline: true },
+          { name: 'Serverrat-Kanal', value: config.serverratChannelId ? `<#${config.serverratChannelId}>` : 'Nicht gesetzt', inline: true },
         ],
       });
       return interaction.reply({ embeds: [embed], ephemeral: true });
@@ -87,6 +97,8 @@ module.exports = {
       config.memberRoleId = interaction.options.getRole('rolle').id;
     } else if (sub === 'viprolle') {
       config.vipRoleId = interaction.options.getRole('rolle').id;
+    } else if (sub === 'serverratkanal') {
+      config.serverratChannelId = interaction.options.getChannel('kanal').id;
     }
 
     await config.save();
