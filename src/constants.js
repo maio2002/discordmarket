@@ -50,4 +50,15 @@ module.exports = {
     mittle_ding: 0.5,
     verkackt: 0,
   },
+  GUILD: {
+    FOUND_COST: 5000,
+    LEVELS: [
+      { name: 'Neuling',     threshold: 0 },
+      { name: 'Siedlung',    threshold: 1_000 },
+      { name: 'Dorf',        threshold: 5_000 },
+      { name: 'Stadt',       threshold: 15_000 },
+      { name: 'Festung',     threshold: 40_000 },
+      { name: 'Kaiserreich', threshold: 100_000 },
+    ],
+  },
 };

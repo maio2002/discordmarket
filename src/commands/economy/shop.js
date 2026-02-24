@@ -53,6 +53,11 @@ module.exports = {
         .setLabel('Kontostand')
         .setEmoji('💰')
         .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId('gilden_view')
+        .setLabel('Gilden')
+        .setEmoji('⚔️')
+        .setStyle(ButtonStyle.Secondary),
     );
     await interaction.reply({ embeds: [embed], components: [row] });
   },

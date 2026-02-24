@@ -1754,6 +1754,43 @@ async function handleButton(interaction) {
     const { embed, components } = await buildShopResponse(interaction.guild.id, category, page);
     return interaction.update({ embeds: [embed], components });
   }
+
+  // ── Gilden ──────────────────────────────────────────────────────────────────
+  if (id === 'gilden_view') {
+    const gs = require('../services/guildService');
+    return gs.handleGildenButton(interaction);
+  }
+  if (id === 'gilden_create') {
+    const gs = require('../services/guildService');
+    return gs.showCreateModal(interaction);
+  }
+  if (id === 'gilden_donate') {
+    const gs = require('../services/guildService');
+    return gs.showDonateModal(interaction);
+  }
+  if (id === 'gilden_invite') {
+    const gs = require('../services/guildService');
+    return gs.showInviteModal(interaction);
+  }
+  if (id === 'gilden_kick') {
+    const gs = require('../services/guildService');
+    return gs.showKickModal(interaction);
+  }
+  if (id === 'gilden_leave') {
+    const gs = require('../services/guildService');
+    return gs.handleLeave(interaction);
+  }
+  if (id === 'gilden_disband') {
+    const gs = require('../services/guildService');
+    return gs.handleDisbandConfirm(interaction);
+  }
+  if (id === 'gilden_disband_yes') {
+    const gs = require('../services/guildService');
+    return gs.handleDisbandExecute(interaction);
+  }
+  if (id === 'gilden_disband_no') {
+    return interaction.update({ content: '❌ Abgebrochen.', embeds: [], components: [] });
+  }
 }
 
 async function handleSelectMenu(interaction) {
@@ -2857,5 +2894,23 @@ async function handleModal(interaction) {
     } catch (err) {
       return interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
     }
+  }
+
+  // ── Gilden Modals ──────────────────────────────────────────────────────────
+  if (id === 'modal_gilden_create') {
+    const gs = require('../services/guildService');
+    return gs.handleCreate(interaction);
+  }
+  if (id === 'modal_gilden_donate') {
+    const gs = require('../services/guildService');
+    return gs.handleDonate(interaction);
+  }
+  if (id === 'modal_gilden_invite') {
+    const gs = require('../services/guildService');
+    return gs.handleInvite(interaction);
+  }
+  if (id === 'modal_gilden_kick') {
+    const gs = require('../services/guildService');
+    return gs.handleKick(interaction);
   }
 }

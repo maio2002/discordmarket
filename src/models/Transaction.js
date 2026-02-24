@@ -10,7 +10,7 @@ const transactionSchema = new mongoose.Schema({
       'message_xp', 'voice_xp', 'message', 'voice',
       'weekly_bonus', 'job_salary', 'levelup',
       'role_purchase', 'own_role', 'prestige', 'trade', 'service', 'shop',
-      'admin_give', 'admin_remove', 'speaker', 'examination', 'quest',
+      'admin_give', 'admin_remove', 'speaker', 'examination', 'quest', 'guild',
     ],
     required: true,
   },
