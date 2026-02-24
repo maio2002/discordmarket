@@ -2947,4 +2947,10 @@ async function handleModal(interaction) {
     const gs = require('../services/guildService');
     return gs.handleManifest(interaction);
   }
+
+  // ── Serverrat Modals ───────────────────────────────────────────────────────
+  if (id === 'modal_verfassung') {
+    const rs = require('../services/ratService');
+    return rs.handleConstitutionModalSubmit(interaction);
+  }
 }

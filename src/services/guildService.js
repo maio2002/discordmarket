@@ -105,48 +105,56 @@ async function getGildenPayload(guildId, userId) {
 
 // ─── Kanal-Verwaltung ────────────────────────────────────────────────────────
 
-async function createGuildChannels(discordGuild, team) {
-  const everyoneDeny = { id: discordGuild.id, type: OverwriteType.Role, deny: [PermissionFlagsBits.ViewChannel] };
-  const memberAllows = team.members.map(id => ({
-    id, type: OverwriteType.Member, allow: [PermissionFlagsBits.ViewChannel],
-  }));
-
-  const category = await discordGuild.channels.create({
-    name: `⚔️ ${team.name}`,
-    type: ChannelType.GuildCategory,
-    permissionOverwrites: [everyoneDeny, ...memberAllows],
-  });
-
-  const chat = await discordGuild.channels.create({
-    name: '💬︱chat',
-    type: ChannelType.GuildText,
-    parent: category.id,
-  });
-
-  // News-Kanal: Mitglieder können lesen, nur Anführer kann schreiben
-  const newsOverwrites = [
-    everyoneDeny,
-    ...team.members.filter(id => id !== team.leaderId).map(id => ({
-      id, type: OverwriteType.Member,
-      allow: [PermissionFlagsBits.ViewChannel],
-      deny: [PermissionFlagsBits.SendMessages],
-    })),
-    { id: team.leaderId, type: OverwriteType.Member, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+function buildGuildOverwrites(discordGuild, team) {
+  return [
+    { id: discordGuild.id, type: OverwriteType.Role, deny: [PermissionFlagsBits.ViewChannel] },
+    ...team.members.map(id => ({ id, type: OverwriteType.Member, allow: [PermissionFlagsBits.ViewChannel] })),
   ];
-  const news = await discordGuild.channels.create({
-    name: '📰︱news',
-    type: ChannelType.GuildText,
-    parent: category.id,
-    permissionOverwrites: newsOverwrites,
-  });
+}
 
-  const voice = await discordGuild.channels.create({
+async function resolveMarker(discordGuild, channelId) {
+  if (!channelId) return { parent: null, position: null };
+  const marker = await discordGuild.channels.fetch(channelId).catch(() => null);
+  if (!marker) return { parent: null, position: null };
+  return { parent: marker.parentId ?? null, position: marker.position };
+}
+
+async function createGuildChannels(discordGuild, team) {
+  const GuildConfig = require('../models/GuildConfig');
+  const config = await GuildConfig.findOne({ guildId: discordGuild.id });
+
+  const overwrites = buildGuildOverwrites(discordGuild, team);
+
+  const [chatMarker, voiceMarker] = await Promise.all([
+    resolveMarker(discordGuild, config?.gildenChatMarkerChannelId),
+    resolveMarker(discordGuild, config?.gildenVoiceMarkerChannelId),
+  ]);
+
+  const chatOptions = {
+    name: `💬︱${team.name.toLowerCase().replace(/\s+/g, '-')}`,
+    type: ChannelType.GuildText,
+    permissionOverwrites: overwrites,
+  };
+  if (chatMarker.parent) chatOptions.parent = chatMarker.parent;
+
+  const voiceOptions = {
     name: `🔊 ${team.name}`,
     type: ChannelType.GuildVoice,
-    parent: category.id,
-  });
+    permissionOverwrites: overwrites,
+  };
+  if (voiceMarker.parent) voiceOptions.parent = voiceMarker.parent;
 
-  return { categoryId: category.id, chatId: chat.id, newsId: news.id, voiceId: voice.id };
+  const chat = await discordGuild.channels.create(chatOptions);
+  const voice = await discordGuild.channels.create(voiceOptions);
+
+  if (chatMarker.position !== null) {
+    await chat.setPosition(chatMarker.position + 1, { relative: false }).catch(() => {});
+  }
+  if (voiceMarker.position !== null) {
+    await voice.setPosition(voiceMarker.position + 1, { relative: false }).catch(() => {});
+  }
+
+  return { categoryId: null, chatId: chat.id, newsId: null, voiceId: voice.id };
 }
 
 async function deleteGuildChannels(discordGuild, team) {
@@ -163,38 +171,15 @@ async function deleteGuildChannels(discordGuild, team) {
 }
 
 async function syncGuildChannelPerms(discordGuild, team) {
-  if (!team.channels?.categoryId) return;
+  const overwrites = buildGuildOverwrites(discordGuild, team);
 
-  const category = await discordGuild.channels.fetch(team.channels.categoryId).catch(() => null);
-  if (!category) return;
+  const chat = team.channels?.chatId
+    ? await discordGuild.channels.fetch(team.channels.chatId).catch(() => null) : null;
+  if (chat) await chat.permissionOverwrites.set(overwrites).catch(() => {});
 
-  const everyoneDeny = { id: discordGuild.id, type: OverwriteType.Role, deny: [PermissionFlagsBits.ViewChannel] };
-  const memberAllows = team.members.map(id => ({
-    id, type: OverwriteType.Member, allow: [PermissionFlagsBits.ViewChannel],
-  }));
-
-  await category.permissionOverwrites.set([everyoneDeny, ...memberAllows]);
-
-  // Chat und Voice synchronisieren Kategorie-Berechtigungen
-  const chat = team.channels.chatId ? await discordGuild.channels.fetch(team.channels.chatId).catch(() => null) : null;
-  if (chat) await chat.lockPermissions().catch(() => {});
-
-  const voice = team.channels.voiceId ? await discordGuild.channels.fetch(team.channels.voiceId).catch(() => null) : null;
-  if (voice) await voice.lockPermissions().catch(() => {});
-
-  // News-Kanal: individuell setzen
-  const news = team.channels.newsId ? await discordGuild.channels.fetch(team.channels.newsId).catch(() => null) : null;
-  if (news) {
-    await news.permissionOverwrites.set([
-      everyoneDeny,
-      ...team.members.filter(id => id !== team.leaderId).map(id => ({
-        id, type: OverwriteType.Member,
-        allow: [PermissionFlagsBits.ViewChannel],
-        deny: [PermissionFlagsBits.SendMessages],
-      })),
-      { id: team.leaderId, type: OverwriteType.Member, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
-    ]).catch(() => {});
-  }
+  const voice = team.channels?.voiceId
+    ? await discordGuild.channels.fetch(team.channels.voiceId).catch(() => null) : null;
+  if (voice) await voice.permissionOverwrites.set(overwrites).catch(() => {});
 }
 
 // ─── Button-Handler ───────────────────────────────────────────────────────────

@@ -15,7 +15,10 @@ const guildConfigSchema = new mongoose.Schema({
   messageCooldownSec: { type: Number, default: 30 },
   voiceMinUsers:      { type: Number, default: 2 },
   roleBuyCooldownMin: { type: Number, default: 20 },
-  serverratChannelId: { type: String, default: null },
+  serverratChannelId:         { type: String, default: null },
+  verfassungChannelId:        { type: String, default: null },
+  gildenChatMarkerChannelId:  { type: String, default: null },
+  gildenVoiceMarkerChannelId: { type: String, default: null },
 });
 
 module.exports = mongoose.model('GuildConfig', guildConfigSchema);

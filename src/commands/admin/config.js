@@ -63,6 +63,31 @@ module.exports = {
             .addChannelTypes(ChannelType.GuildText)
         )
     )
+    .addSubcommand(sub =>
+      sub
+        .setName('verfassungskanal')
+        .setDescription('Kanal setzen, in dem die Serververfassung automatisch angezeigt wird')
+        .addChannelOption(opt =>
+          opt.setName('kanal').setDescription('Der Verfassungskanal').setRequired(true)
+            .addChannelTypes(ChannelType.GuildText)
+        )
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName('gildenchatmarker')
+        .setDescription('Marker-Kanal für Gilden-Chats — Textkanäle werden darunter erstellt')
+        .addChannelOption(opt =>
+          opt.setName('kanal').setDescription('Der Marker-Kanal').setRequired(true)
+        )
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName('gildenvoicemarker')
+        .setDescription('Marker-Kanal für Gilden-VCs — Sprachkanäle werden darunter erstellt')
+        .addChannelOption(opt =>
+          opt.setName('kanal').setDescription('Der Marker-Kanal').setRequired(true)
+        )
+    )
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
@@ -82,6 +107,9 @@ module.exports = {
           { name: 'Member-Rolle', value: config.memberRoleId ? `<@&${config.memberRoleId}>` : 'Nicht gesetzt', inline: true },
           { name: 'VIP-Rolle', value: config.vipRoleId ? `<@&${config.vipRoleId}>` : 'Nicht gesetzt', inline: true },
           { name: 'Serverrat-Kanal', value: config.serverratChannelId ? `<#${config.serverratChannelId}>` : 'Nicht gesetzt', inline: true },
+          { name: 'Verfassungskanal', value: config.verfassungChannelId ? `<#${config.verfassungChannelId}>` : 'Nicht gesetzt', inline: true },
+          { name: 'Gilden-Chat-Marker', value: config.gildenChatMarkerChannelId ? `<#${config.gildenChatMarkerChannelId}>` : 'Nicht gesetzt', inline: true },
+          { name: 'Gilden-Voice-Marker', value: config.gildenVoiceMarkerChannelId ? `<#${config.gildenVoiceMarkerChannelId}>` : 'Nicht gesetzt', inline: true },
         ],
       });
       return interaction.reply({ embeds: [embed], ephemeral: true });
@@ -99,6 +127,12 @@ module.exports = {
       config.vipRoleId = interaction.options.getRole('rolle').id;
     } else if (sub === 'serverratkanal') {
       config.serverratChannelId = interaction.options.getChannel('kanal').id;
+    } else if (sub === 'verfassungskanal') {
+      config.verfassungChannelId = interaction.options.getChannel('kanal').id;
+    } else if (sub === 'gildenchatmarker') {
+      config.gildenChatMarkerChannelId = interaction.options.getChannel('kanal').id;
+    } else if (sub === 'gildenvoicemarker') {
+      config.gildenVoiceMarkerChannelId = interaction.options.getChannel('kanal').id;
     }
 
     await config.save();

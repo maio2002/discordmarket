@@ -1,6 +1,7 @@
 const {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   StringSelectMenuBuilder, EmbedBuilder,
+  ModalBuilder, TextInputBuilder, TextInputStyle,
 } = require('discord.js');
 const Proposal = require('../models/Proposal');
 const Constitution = require('../models/Constitution');
@@ -227,9 +228,16 @@ async function closeExpiredProposals(client) {
     if (status === 'passed' && proposal.type === 'amendment' && proposal.amendmentContent) {
       await Constitution.findOneAndUpdate(
         { guildId: proposal.guildId },
-        { content: proposal.amendmentContent, $inc: { version: 1 }, editedBy: proposal.submittedBy },
+        { $set: { content: proposal.amendmentContent, editedBy: proposal.submittedBy }, $inc: { version: 1 } },
         { upsert: true },
       );
+      // Verfassungskanal synchronisieren
+      try {
+        const guildObj = client.guilds.cache.get(proposal.guildId);
+        if (guildObj) await syncConstitutionChannel(guildObj);
+      } catch (err) {
+        logger.warn(`Verfassungskanal-Sync (Amendment) fehlgeschlagen: ${err.message}`);
+      }
     }
 
     // Nachricht im Serverrat updaten
@@ -244,31 +252,97 @@ async function closeExpiredProposals(client) {
 
 // ─── Verfassung ───────────────────────────────────────────────────────────────
 
-async function handleConstitutionView(interaction) {
-  const doc = await Constitution.findOne({ guildId: interaction.guild.id });
+function buildConstitutionEmbed(doc) {
   const content = doc?.content ?? '*(Noch keine Verfassung geschrieben.)*';
   const version = doc?.version ?? 0;
-
-  const embed = createEmbed({
+  const updatedAt = doc?.updatedAt ? `<t:${Math.floor(new Date(doc.updatedAt).getTime() / 1000)}:f>` : '—';
+  return createEmbed({
     title: '📜 Serververfassung',
     color: COLORS.GOLD,
     description: content.length > 4000 ? content.substring(0, 4000) + '…' : content,
-    footer: `Version ${version}${doc?.editedBy ? ` · Zuletzt bearbeitet von einem Nutzer` : ''}`,
+    footer: `Version ${version} · Zuletzt aktualisiert: ${updatedAt}`,
   });
-  return interaction.reply({ embeds: [embed], ephemeral: true });
 }
 
-async function handleConstitutionEdit(interaction) {
-  if (!interaction.member.permissions.has(require('discord.js').PermissionFlagsBits.Administrator)) {
-    return interaction.reply({ content: '❌ Nur Admins können die Verfassung direkt bearbeiten.', ephemeral: true });
+async function syncConstitutionChannel(discordGuild) {
+  const config = await GuildConfig.findOne({ guildId: discordGuild.id });
+  if (!config?.verfassungChannelId) return;
+
+  const channel = await discordGuild.channels.fetch(config.verfassungChannelId).catch(() => null);
+  if (!channel) return;
+
+  const doc = await Constitution.findOne({ guildId: discordGuild.id });
+  const embed = buildConstitutionEmbed(doc);
+
+  // Vorhandene Nachricht editieren oder neue senden
+  if (doc?.messageId) {
+    const existing = await channel.messages.fetch(doc.messageId).catch(() => null);
+    if (existing) {
+      await existing.edit({ embeds: [embed] });
+      return;
+    }
   }
-  const text = interaction.options.getString('text');
+
+  // Neue Nachricht senden und ID speichern
+  const msg = await channel.send({ embeds: [embed] });
   await Constitution.findOneAndUpdate(
-    { guildId: interaction.guild.id },
-    { content: text, $inc: { version: 1 }, editedBy: interaction.user.id },
+    { guildId: discordGuild.id },
+    { messageId: msg.id },
     { upsert: true },
   );
-  return interaction.reply({ content: '✅ Verfassung aktualisiert.', ephemeral: true });
+}
+
+async function handleConstitutionView(interaction) {
+  const doc = await Constitution.findOne({ guildId: interaction.guild.id });
+  const embed = buildConstitutionEmbed(doc);
+  return interaction.reply({ embeds: [embed] });
+}
+
+async function showConstitutionModal(interaction) {
+  const { PermissionFlagsBits } = require('discord.js');
+  if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+    return interaction.reply({ content: '❌ Nur Admins können die Verfassung bearbeiten.', ephemeral: true });
+  }
+
+  const doc = await Constitution.findOne({ guildId: interaction.guild.id });
+  const current = doc?.content ?? '';
+
+  const modal = new ModalBuilder()
+    .setCustomId('modal_verfassung')
+    .setTitle('Serververfassung bearbeiten');
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('text')
+        .setLabel('Verfassungstext')
+        .setStyle(TextInputStyle.Paragraph)
+        .setMaxLength(4000)
+        .setRequired(true)
+        .setValue(current.substring(0, 4000)),
+    ),
+  );
+
+  return interaction.showModal(modal);
+}
+
+async function handleConstitutionModalSubmit(interaction) {
+  const text = interaction.fields.getTextInputValue('text').trim();
+
+  await Constitution.findOneAndUpdate(
+    { guildId: interaction.guild.id },
+    { $set: { content: text, editedBy: interaction.user.id }, $inc: { version: 1 } },
+    { upsert: true, new: true },
+  );
+
+  // Verfassungskanal überschreiben
+  try {
+    await syncConstitutionChannel(interaction.guild);
+  } catch (err) {
+    logger.warn(`Verfassungskanal-Sync fehlgeschlagen: ${err.message}`);
+  }
+
+  return interaction.reply({ content: '✅ Verfassung aktualisiert und Kanal synchronisiert.', ephemeral: true });
 }
 
 // ─── Wahlen ───────────────────────────────────────────────────────────────────
@@ -424,7 +498,9 @@ module.exports = {
   handleProposalList,
   handleVote,
   handleConstitutionView,
-  handleConstitutionEdit,
+  showConstitutionModal,
+  handleConstitutionModalSubmit,
+  syncConstitutionChannel,
   handleElectionCreate,
   handleElectionList,
   handleCandidacy,
