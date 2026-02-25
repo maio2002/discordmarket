@@ -5,11 +5,18 @@ const {
 const SeatElection = require('../models/SeatElection');
 const GuildTeam    = require('../models/GuildTeam');
 const GuildConfig  = require('../models/GuildConfig');
+const User         = require('../models/User');
 const { createEmbed, COLORS } = require('../utils/embedBuilder');
-const { SEATS } = require('../constants');
+const { SEATS, LEVEL } = require('../constants');
 const logger = require('../utils/logger');
 
 const MAX_SEATS = SEATS.MAX_SEATS;
+
+// Stimmgewicht nach Rang-Stufe
+const VOTE_WEIGHTS = [1, 1, 1, 2, 3, 5, 6, 6, 7, 9];
+function voteWeight(level) {
+  return VOTE_WEIGHTS[level] ?? 1;
+}
 
 // ─── Hilfsfunktionen ─────────────────────────────────────────────────────────
 
@@ -17,7 +24,7 @@ function getVoteCounts(election) {
   const counts = {};
   for (const v of election.votes) {
     const key = v.teamId.toString();
-    counts[key] = (counts[key] ?? 0) + 1;
+    counts[key] = (counts[key] ?? 0) + (v.weight ?? 1);
   }
   return counts;
 }
@@ -78,7 +85,7 @@ function buildSeatElectionEmbed(election, teams, voteCounts) {
       { name: 'Stimmen',       value: `${totalVotes}`,        inline: true },
       { name: 'Sitze (max.)',  value: `${MAX_SEATS}`,         inline: true },
     ],
-    footer: active ? '🗳️ Wahl läuft — jeder kann einmal abstimmen' : '✅ Wahl beendet',
+    footer: active ? '🗳️ Wahl läuft — Stimmgewicht: Händler×2, Bürger×3, Ritter×5, Mönch×6, Priester×6, Graf×7, König×9' : '✅ Wahl beendet',
   });
 }
 
@@ -105,27 +112,27 @@ async function startSeatElection(discordGuild) {
   const existing = await SeatElection.findOne({ guildId: discordGuild.id, status: 'active' });
   if (existing) return null; // bereits aktiv
 
-  const config = await GuildConfig.findOne({ guildId: discordGuild.id });
-  if (!config?.seatElectionChannelId) return null;
-
-  const channel = await discordGuild.channels.fetch(config.seatElectionChannelId).catch(() => null);
-  if (!channel) return null;
-
   const deadline = new Date(Date.now() + SEATS.ELECTION_DAYS * 86_400_000);
   const election = await SeatElection.create({ guildId: discordGuild.id, deadline });
 
-  const teams      = await GuildTeam.find({ guildId: discordGuild.id });
-  const voteCounts = {};
-
-  const msg = await channel.send({
-    content:    '🗳️ **Die monatliche Sitzwahl hat begonnen!** Wähle jetzt deine Fraktion!',
-    embeds:     [buildSeatElectionEmbed(election, teams, voteCounts)],
-    components: [buildSeatVoteButton(election._id)],
-  });
-
-  election.channelId = msg.channelId;
-  election.messageId = msg.id;
-  await election.save();
+  // Nachricht im konfigurierten Kanal posten — optional
+  const config = await GuildConfig.findOne({ guildId: discordGuild.id });
+  if (config?.seatElectionChannelId) {
+    const channel = await discordGuild.channels.fetch(config.seatElectionChannelId).catch(() => null);
+    if (channel) {
+      const teams = await GuildTeam.find({ guildId: discordGuild.id });
+      const msg   = await channel.send({
+        content:    '🗳️ **Die monatliche Sitzwahl hat begonnen!** Wähle jetzt deine Fraktion!',
+        embeds:     [buildSeatElectionEmbed(election, teams, {})],
+        components: [buildSeatVoteButton(election._id)],
+      }).catch(() => null);
+      if (msg) {
+        election.channelId = msg.channelId;
+        election.messageId = msg.id;
+        await election.save();
+      }
+    }
+  }
 
   logger.info(`Sitzwahl für Guild ${discordGuild.id} gestartet (${SEATS.ELECTION_DAYS} Tage).`);
   return election;
@@ -230,12 +237,17 @@ async function handleSeatVoteSelect(interaction) {
   const team = await GuildTeam.findById(teamId);
   if (!team) return interaction.update({ content: '❌ Fraktion nicht gefunden.', components: [] });
 
-  election.votes.push({ userId: user.id, teamId });
+  const userDoc = await User.findOne({ guildId: guild.id, userId: user.id });
+  const weight  = voteWeight(userDoc?.level ?? 0);
+  const rankName = userDoc?.level > 0 ? (LEVEL.RANKS[userDoc.level - 1]?.name ?? 'Unbekannt') : 'Kein Rang';
+
+  election.votes.push({ userId: user.id, teamId, weight });
   await election.save();
 
   updateSeatElectionMessage(election, guild).catch(() => {});
 
-  return interaction.update({ content: `✅ Du hast für **${team.name}** gestimmt!`, components: [] });
+  const weightInfo = weight > 1 ? ` *(${rankName} — **${weight}× Stimmgewicht**)` : '';
+  return interaction.update({ content: `✅ Du hast für **${team.name}** gestimmt!${weightInfo}`, components: [] });
 }
 
 // ─── Sitze vergeben / entziehen ───────────────────────────────────────────────
@@ -393,6 +405,22 @@ async function handleSeatRevokeSelect(interaction) {
 
 async function handleSeatList(interaction) {
   const { guild } = interaction;
+
+  // Aktive Wahl prüfen
+  const election = await SeatElection.findOne({ guildId: guild.id, status: 'active' });
+
+  if (election) {
+    const teams      = await GuildTeam.find({ guildId: guild.id });
+    const voteCounts = getVoteCounts(election);
+    const embed      = buildSeatElectionEmbed(election, teams, voteCounts);
+
+    const alreadyVoted = election.votes.some(v => v.userId === interaction.user.id);
+    const row = alreadyVoted ? [] : [buildSeatVoteButton(election._id)];
+
+    return interaction.update({ embeds: [embed], components: row });
+  }
+
+  // Keine aktive Wahl — Sitzverteilung + nächste Wahl anzeigen
   const teams = await GuildTeam.find({ guildId: guild.id });
 
   const totalSeats    = teams.reduce((s, t) => s + t.seats, 0);
@@ -402,18 +430,28 @@ async function handleSeatList(interaction) {
     .filter(t => t.seats > 0 || t.members.length > 0)
     .sort((a, b) => b.seats - a.seats)
     .map(t => {
-      const bar = t.seats > 0 ? `${'█'.repeat(t.assignedSeats.length)}${'░'.repeat(t.seats - t.assignedSeats.length)} ${t.assignedSeats.length}/${t.seats}` : '—';
+      const bar = t.seats > 0
+        ? `${'█'.repeat(t.assignedSeats.length)}${'░'.repeat(t.seats - t.assignedSeats.length)} ${t.assignedSeats.length}/${t.seats}`
+        : '—';
       return `**${t.name}** — ${bar}`;
     });
+
+  // Nächste Wahl: immer am 1. des nächsten Monats
+  const now = new Date();
+  const nextElection = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0);
+  const nextTs = Math.floor(nextElection.getTime() / 1000);
 
   const embed = createEmbed({
     title:       '🏛️ Sitzverteilung',
     color:       COLORS.GOLD,
-    description: lines.length ? lines.join('\n') : '*Noch keine Sitze vergeben (Sitzwahl ausstehend)*',
-    footer:      `${totalAssigned}/${totalSeats} Sitze besetzt · max. ${MAX_SEATS}`,
+    description: lines.length ? lines.join('\n') : '*Noch keine Sitze vergeben*',
+    fields: [
+      { name: 'Nächste Sitzwahl', value: `<t:${nextTs}:F> (<t:${nextTs}:R>)`, inline: false },
+    ],
+    footer: `${totalAssigned}/${totalSeats} Sitze besetzt · max. ${MAX_SEATS}`,
   });
 
-  return interaction.reply({ embeds: [embed] });
+  return interaction.update({ embeds: [embed], components: [] });
 }
 
 module.exports = {

@@ -82,6 +82,8 @@ function levelColor(level) {
 
 // ─── Embed & Payload ─────────────────────────────────────────────────────────
 
+// ─── Detail-View (Gilden-Info + Basis-Aktionen) ───────────────────────────────
+
 function buildGildenEmbed(team, viewerId = null) {
   const levelName = GUILD.LEVELS[team.level]?.name ?? 'Unbekannt';
   const d = new Date(team.foundedAt);
@@ -122,78 +124,83 @@ function buildGildenEmbed(team, viewerId = null) {
     footer: `Gegründet am ${founded}`,
   });
 
-  let row, row2;
+  // Basis-Buttons für alle Mitglieder
+  const rowButtons = [
+    new ButtonBuilder().setCustomId('gilden_donate').setLabel('Spenden').setEmoji('💰').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('gilden_leave').setLabel('Verlassen').setEmoji('🚶').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('gilden_news').setLabel('News').setEmoji('📰').setStyle(ButtonStyle.Secondary),
+  ];
 
   if (team.leaderless) {
-    // Leiterlose Gilde: nur beitreten oder Führung übernehmen
-    row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('gilden_donate').setLabel('Spenden').setEmoji('💰').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('gilden_leave').setLabel('Verlassen').setEmoji('🚶').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('gilden_claim_leader').setLabel(`Führung übernehmen (${formatCoins(GUILD.CLAIM_COST)})`).setEmoji('👑').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('gilden_news').setLabel('Neuigkeiten').setEmoji('📰').setStyle(ButtonStyle.Secondary),
+    rowButtons.push(
+      new ButtonBuilder()
+        .setCustomId('gilden_claim_leader')
+        .setLabel(`Führung übernehmen (${formatCoins(GUILD.CLAIM_COST)})`)
+        .setEmoji('👑')
+        .setStyle(ButtonStyle.Primary),
     );
-    return { embeds: [embed], components: [row] };
-  }
-
-  row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('gilden_donate').setLabel('Spenden').setEmoji('💰').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId('gilden_invite').setLabel('Einladen').setEmoji('➕').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('gilden_kick').setLabel('Kick').setEmoji('🚪').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('gilden_leave').setLabel('Verlassen').setEmoji('🚶').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('gilden_disband').setLabel('Auflösen').setEmoji('💀').setStyle(ButtonStyle.Danger),
-  );
-
-  row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('gilden_manifest').setLabel('Manifest bearbeiten').setEmoji('📜').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('gilden_news').setLabel('Neuigkeiten').setEmoji('📰').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('gilden_sitze_vergeben').setLabel('Sitze vergeben').setEmoji('🏛️').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('gilden_sitze_entziehen').setLabel('Sitz entziehen').setEmoji('🪑').setStyle(ButtonStyle.Danger),
-  );
-
-  const components = [row, row2];
-
-  // Anfragen-Sektion nur für den Anführer
-  const isLeader = viewerId && team.leaderId === viewerId;
-  const pending  = team.pendingRequests ?? [];
-  if (isLeader && pending.length > 0) {
-    embed.addFields({
-      name:  `📥 Offene Beitrittsanfragen (${pending.length})`,
-      value: pending.map(id => `<@${id}>`).join(', '),
-    });
-    const rowAnfragen = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId('gilden_anfragen_annehmen')
-        .setLabel(`Annehmen (${pending.length})`)
-        .setEmoji('✅')
-        .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId('gilden_anfragen_ablehnen')
-        .setLabel('Ablehnen')
-        .setEmoji('❌')
-        .setStyle(ButtonStyle.Danger),
-    );
-    components.push(rowAnfragen);
-  }
-
-  // Stufen-Belohnungen (nur für Anführer ab Stufe 1)
-  if (isLeader && team.level >= 1) {
-    const levelButtons = [
-      new ButtonBuilder()
-        .setCustomId('gilden_role_color')
-        .setLabel('Rolle anpassen')
-        .setEmoji('🎨')
-        .setStyle(ButtonStyle.Secondary),
-    ];
-    if (team.level >= 2) {
-      levelButtons.push(
+  } else {
+    const isLeader = viewerId && team.leaderId === viewerId;
+    if (isLeader) {
+      rowButtons.push(
         new ButtonBuilder()
-          .setCustomId('gilden_personal')
-          .setLabel('Personal')
-          .setEmoji('👥')
+          .setCustomId('gilden_manage')
+          .setLabel('Verwalten')
+          .setEmoji('🔧')
           .setStyle(ButtonStyle.Primary),
       );
     }
-    components.push(new ActionRowBuilder().addComponents(levelButtons));
+  }
+
+  return { embeds: [embed], components: [new ActionRowBuilder().addComponents(rowButtons)] };
+}
+
+// ─── Verwaltungs-Panel (nur für Anführer) ─────────────────────────────────────
+
+function buildManagePayload(team) {
+  const pending = team.pendingRequests ?? [];
+
+  let description = '🔧 Verwalte deine Gilde.';
+  if (pending.length > 0) {
+    description += `\n\n📥 **${pending.length} offene Beitrittsanfrage(n):** ${pending.map(id => `<@${id}>`).join(', ')}`;
+  }
+
+  const embed = createEmbed({
+    title: `🔧 ${team.name} — Verwaltung`,
+    color: COLORS.PRIMARY,
+    description,
+  });
+
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('gilden_invite').setLabel('Einladen').setEmoji('➕').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('gilden_kick').setLabel('Kick').setEmoji('🚪').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('gilden_manifest').setLabel('Manifest').setEmoji('📜').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('gilden_news').setLabel('News').setEmoji('📰').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('gilden_disband').setLabel('Auflösen').setEmoji('💀').setStyle(ButtonStyle.Danger),
+  );
+
+  const row2Buttons = [
+    new ButtonBuilder().setCustomId('gilden_sitze_vergeben').setLabel('Sitze vergeben').setEmoji('🏛️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('gilden_sitze_entziehen').setLabel('Sitz entziehen').setEmoji('🪑').setStyle(ButtonStyle.Secondary),
+  ];
+  if (team.level >= 1) {
+    row2Buttons.push(
+      new ButtonBuilder().setCustomId('gilden_role_color').setLabel('Rolle anpassen').setEmoji('🎨').setStyle(ButtonStyle.Secondary),
+    );
+  }
+  if (team.level >= 2) {
+    row2Buttons.push(
+      new ButtonBuilder().setCustomId('gilden_personal').setLabel('Personal').setEmoji('👥').setStyle(ButtonStyle.Primary),
+    );
+  }
+
+  const components = [row1, new ActionRowBuilder().addComponents(row2Buttons)];
+
+  if (pending.length > 0) {
+    components.push(new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('gilden_anfragen_annehmen').setLabel(`Annehmen (${pending.length})`).setEmoji('✅').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('gilden_anfragen_ablehnen').setLabel('Ablehnen').setEmoji('❌').setStyle(ButtonStyle.Danger),
+    ));
   }
 
   return { embeds: [embed], components };
@@ -202,38 +209,65 @@ function buildGildenEmbed(team, viewerId = null) {
 async function buildNoGildePayload(guildId) {
   const allTeams = await GuildTeam.find({ guildId }).lean();
 
-  let description = `Du bist noch in keiner Gilde.\n\nGründe deine eigene für **${formatCoins(GUILD.FOUND_COST)}**!`;
-  if (allTeams.length) {
-    description += '\n\n**Gilden:**\n' +
-      allTeams.map(t => {
-        const status = t.leaderless ? '*(kein Anführer — direkt beitreten)*' : '*(Beitritt per Anfrage)*';
-        return `• **${t.name}** ${status}${t.description ? ` — *${t.description}*` : ''}`;
-      }).join('\n');
-  }
-
   const embed = createEmbed({
-    title: '⚔️ Gilden',
+    title: '⚔️ Gilden-System',
     color: COLORS.PRIMARY,
-    description,
+    description:
+      'Du bist noch keiner Gilde beigetreten.\n\n' +
+      'Gilden ermöglichen dir:\n' +
+      '• 💰 Gemeinsame Kasse aufbauen\n' +
+      '• 🏆 Stufen-Belohnungen freischalten\n' +
+      '• 🏛️ Politische Sitze im Rat gewinnen\n' +
+      '• 👥 Personal mit besonderen Rechten ernennen',
   });
 
   const buttons = [
-    new ButtonBuilder().setCustomId('gilden_create').setLabel('Gilde gründen').setEmoji('⚔️').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('gilden_rangliste').setLabel('Rangliste').setEmoji('📊').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('gilden_create').setLabel(`Gründen (${formatCoins(GUILD.FOUND_COST)})`).setEmoji('⚔️').setStyle(ButtonStyle.Success),
   ];
   if (allTeams.length) {
     buttons.push(
-      new ButtonBuilder().setCustomId('gilden_join').setLabel('Gilde beitreten').setEmoji('🤝').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('gilden_join').setLabel('Beitreten').setEmoji('🤝').setStyle(ButtonStyle.Primary),
     );
   }
+  buttons.push(
+    new ButtonBuilder().setCustomId('gilden_sitzwahl').setLabel('Sitzwahl').setEmoji('🗳️').setStyle(ButtonStyle.Secondary),
+  );
 
-  const row = new ActionRowBuilder().addComponents(buttons);
-  return { embeds: [embed], components: [row] };
+  return { embeds: [embed], components: [new ActionRowBuilder().addComponents(buttons)] };
 }
 
 async function getGildenPayload(guildId, userId) {
   const team = await GuildTeam.findOne({ guildId, members: userId });
   if (!team) return buildNoGildePayload(guildId);
-  return buildGildenEmbed(team, userId);
+
+  // Neueste News oder Platzhalter
+  const sorted  = (team.news ?? []).slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const latest  = sorted[0];
+  const levelName = GUILD.LEVELS[team.level]?.name ?? 'Unbekannt';
+
+  let description;
+  if (latest) {
+    const d = new Date(latest.createdAt);
+    const dateStr = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+    description = `**📰 Neueste Nachricht** — *${dateStr}*\n\n${latest.content}\n\n— <@${latest.authorId}>`;
+  } else {
+    description = `*Noch keine Neuigkeiten in **${team.name}**.*`;
+  }
+
+  const embed = createEmbed({
+    title: `⚔️ ${team.name} — Stufe ${team.level} (${levelName})`,
+    color: levelColor(team.level),
+    description,
+  });
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('gilden_rangliste').setLabel('Rangliste').setEmoji('📊').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('gilden_view_detail').setLabel(team.name.slice(0, 80)).setEmoji('⚔️').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('gilden_sitzwahl').setLabel('Sitzwahl').setEmoji('🗳️').setStyle(ButtonStyle.Secondary),
+  );
+
+  return { embeds: [embed], components: [row] };
 }
 
 // ─── Kanal-Verwaltung ────────────────────────────────────────────────────────
@@ -334,6 +368,44 @@ async function syncGuildChannelPerms(discordGuild, team) {
 async function handleGildenButton(interaction) {
   const payload = await getGildenPayload(interaction.guild.id, interaction.user.id);
   return interaction.reply({ ...payload, ephemeral: true });
+}
+
+async function handleGildenViewDetail(interaction) {
+  const { guild, user } = interaction;
+  const team = await GuildTeam.findOne({ guildId: guild.id, members: user.id });
+  if (!team) return interaction.update({ content: '❌ Du bist in keiner Gilde.', embeds: [], components: [] });
+  return interaction.update(buildGildenEmbed(team, user.id));
+}
+
+async function handleManageView(interaction) {
+  const { guild, user } = interaction;
+  const team = await GuildTeam.findOne({ guildId: guild.id, leaderId: user.id });
+  if (!team) return interaction.reply({ content: '❌ Nur der Anführer kann die Gilde verwalten.', ephemeral: true });
+  return interaction.reply({ ...buildManagePayload(team), ephemeral: true });
+}
+
+async function handleRangliste(interaction) {
+  const { guild } = interaction;
+  const teams = await GuildTeam.find({ guildId: guild.id }).sort({ treasury: -1 }).lean();
+
+  if (!teams.length) {
+    return interaction.reply({ content: '❌ Noch keine Gilden vorhanden.', ephemeral: true });
+  }
+
+  const medals = ['🥇', '🥈', '🥉'];
+  const lines  = teams.map((t, i) => {
+    const levelName = GUILD.LEVELS[t.level]?.name ?? '?';
+    const prefix    = medals[i] ?? `**${i + 1}.**`;
+    return `${prefix} **${t.name}** — Stufe ${t.level} (${levelName}) · ${formatCoins(t.treasury)}`;
+  });
+
+  const embed = createEmbed({
+    title:       '🏆 Gilden-Rangliste',
+    color:       COLORS.GOLD,
+    description: lines.join('\n'),
+  });
+
+  return interaction.reply({ embeds: [embed], ephemeral: true });
 }
 
 async function handleLeave(interaction) {
@@ -1194,6 +1266,9 @@ async function handleClaimLeadership(interaction) {
 module.exports = {
   getGildenPayload,
   handleGildenButton,
+  handleGildenViewDetail,
+  handleManageView,
+  handleRangliste,
   createGuildChannels,
   handleCreate,
   handleDonate,

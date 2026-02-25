@@ -57,9 +57,7 @@ module.exports = {
       await interaction.deferReply({ ephemeral: true });
       const election = await seatService.startSeatElection(guild);
       if (!election) {
-        return interaction.editReply({
-          content: '❌ Konnte nicht starten — läuft bereits eine Wahl, oder kein Sitzwahl-Kanal konfiguriert (`/config sitzwahlkanal`).',
-        });
+        return interaction.editReply({ content: '❌ Konnte nicht starten — es läuft bereits eine Wahl.' });
       }
       return interaction.editReply({ content: '✅ Sitzwahl manuell gestartet!' });
     }

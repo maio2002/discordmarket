@@ -7,6 +7,7 @@ const seatElectionSchema = new mongoose.Schema({
   votes: [{
     userId: { type: String },
     teamId: { type: mongoose.Schema.Types.ObjectId, ref: 'GuildTeam' },
+    weight: { type: Number, default: 1 },
   }],
   channelId: { type: String, default: null },
   messageId: { type: String, default: null },

@@ -1760,6 +1760,22 @@ async function handleButton(interaction) {
     const gs = require('../services/guildService');
     return gs.handleGildenButton(interaction);
   }
+  if (id === 'gilden_view_detail') {
+    const gs = require('../services/guildService');
+    return gs.handleGildenViewDetail(interaction);
+  }
+  if (id === 'gilden_manage') {
+    const gs = require('../services/guildService');
+    return gs.handleManageView(interaction);
+  }
+  if (id === 'gilden_rangliste') {
+    const gs = require('../services/guildService');
+    return gs.handleRangliste(interaction);
+  }
+  if (id === 'gilden_sitzwahl') {
+    const ss = require('../services/seatService');
+    return ss.handleSeatList(interaction);
+  }
   if (id === 'gilden_create') {
     const gs = require('../services/guildService');
     return gs.showCreateModal(interaction);
