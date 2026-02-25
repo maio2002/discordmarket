@@ -251,18 +251,21 @@ async function handleVote(interaction, vote) {
     return interaction.reply({ content: '❌ Dieser Antrag ist nicht mehr aktiv.', ephemeral: true });
   }
 
-  const team = await GuildTeam.findOne({ guildId: guild.id, leaderId: user.id });
-  if (!team) return interaction.reply({ content: '❌ Nur Gildenführer können abstimmen.', ephemeral: true });
+  const config = await GuildConfig.findOne({ guildId: guild.id });
 
-  const already = proposal.votes.find(v => v.teamId?.toString() === team._id.toString());
-  if (already) {
-    return interaction.reply({ content: `❌ Deine Gilde hat bereits mit **${already.vote === 'yes' ? 'Ja' : 'Nein'}** gestimmt.`, ephemeral: true });
+  // Nur Sitzinhaber dürfen abstimmen (eine Stimme pro Person)
+  if (!config?.sitzRoleId || !interaction.member.roles.cache.has(config.sitzRoleId)) {
+    return interaction.reply({ content: '❌ Nur Ratsabgeordnete (Sitzinhaber) dürfen über Anträge abstimmen.', ephemeral: true });
   }
 
-  proposal.votes.push({ teamId: team._id, vote, votedBy: user.id });
+  const already = proposal.votes.find(v => v.votedBy === user.id);
+  if (already) {
+    return interaction.reply({ content: `❌ Du hast bereits mit **${already.vote === 'yes' ? 'Ja' : 'Nein'}** gestimmt.`, ephemeral: true });
+  }
+
+  proposal.votes.push({ teamId: null, vote, votedBy: user.id });
   await proposal.save();
   await updateProposalMessage(proposal, guild);
-
   return interaction.reply({ content: `✅ Du hast für **${proposal.title}** mit **${vote === 'yes' ? 'Ja ✅' : 'Nein ❌'}** gestimmt.`, ephemeral: true });
 }
 

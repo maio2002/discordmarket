@@ -128,7 +128,7 @@ module.exports = {
           { name: 'Gilden-Chat-Marker', value: config.gildenChatMarkerChannelId ? `<#${config.gildenChatMarkerChannelId}>` : 'Nicht gesetzt', inline: true },
           { name: 'Gilden-Voice-Marker', value: config.gildenVoiceMarkerChannelId ? `<#${config.gildenVoiceMarkerChannelId}>` : 'Nicht gesetzt', inline: true },
           { name: 'Sitzwahl-Kanal', value: config.seatElectionChannelId ? `<#${config.seatElectionChannelId}>` : 'Nicht gesetzt', inline: true },
-          { name: 'Sitz-Rolle', value: config.sitzRoleId ? `<@&${config.sitzRoleId}>` : 'Nicht gesetzt', inline: true },
+          { name: 'Sitz-Rolle (= Abstimmrecht)', value: config.sitzRoleId ? `<@&${config.sitzRoleId}>` : 'Nicht gesetzt', inline: true },
         ],
       });
       return interaction.reply({ embeds: [embed], ephemeral: true });

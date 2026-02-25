@@ -62,7 +62,8 @@ module.exports = {
     ELECTION_DAYS:  7,   // Wie viele Tage die Wahl läuft
   },
   GUILD: {
-    FOUND_COST: 5000,
+    FOUND_COST:  5000,
+    CLAIM_COST:  1000,
     LEVELS: [
       { name: 'Neuling',     threshold: 0 },
       { name: 'Siedlung',    threshold: 1_000 },

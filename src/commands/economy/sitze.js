@@ -13,18 +13,12 @@ module.exports = {
     .addSubcommand(sub =>
       sub
         .setName('vergeben')
-        .setDescription('Einem Mitglied deiner Fraktion einen Sitz geben')
-        .addUserOption(opt =>
-          opt.setName('mitglied').setDescription('Das Mitglied').setRequired(true),
-        ),
+        .setDescription('Einem Mitglied deiner Fraktion einen Sitz geben'),
     )
     .addSubcommand(sub =>
       sub
         .setName('entziehen')
-        .setDescription('Einem Mitglied deiner Fraktion den Sitz entziehen')
-        .addUserOption(opt =>
-          opt.setName('mitglied').setDescription('Das Mitglied').setRequired(true),
-        ),
+        .setDescription('Einem Mitglied deiner Fraktion den Sitz entziehen'),
     ),
 
   async execute(interaction) {

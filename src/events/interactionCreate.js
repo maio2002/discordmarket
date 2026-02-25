@@ -1795,6 +1795,18 @@ async function handleButton(interaction) {
     const gs = require('../services/guildService');
     return gs.showManifestModal(interaction);
   }
+  if (id === 'gilden_sitze_vergeben') {
+    const ss = require('../services/seatService');
+    return ss.handleSeatAssign(interaction);
+  }
+  if (id === 'gilden_join') {
+    const gs = require('../services/guildService');
+    return gs.handleJoin(interaction);
+  }
+  if (id === 'gilden_claim_leader') {
+    const gs = require('../services/guildService');
+    return gs.handleClaimLeadership(interaction);
+  }
 
   // ── Serverrat Abstimmung ───────────────────────────────────────────────────
   if (id.startsWith('rp_yes_')) {
@@ -2311,6 +2323,22 @@ async function handleSelectMenu(interaction) {
   if (id.startsWith('seat_select_')) {
     const ss = require('../services/seatService');
     return ss.handleSeatVoteSelect(interaction);
+  }
+
+  // ── Sitze vergeben / entziehen (UI) ──────────────────────────────────────
+  if (id.startsWith('seat_assign_select_')) {
+    const ss = require('../services/seatService');
+    return ss.handleSeatAssignSelect(interaction);
+  }
+  if (id.startsWith('seat_revoke_select_')) {
+    const ss = require('../services/seatService');
+    return ss.handleSeatRevokeSelect(interaction);
+  }
+
+  // ── Gilden: Fraktion beitreten ────────────────────────────────────────────
+  if (id === 'gilden_join_select') {
+    const gs = require('../services/guildService');
+    return gs.handleJoinSelect(interaction);
   }
 }
 

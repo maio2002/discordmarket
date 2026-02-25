@@ -1,6 +1,7 @@
 const {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   ModalBuilder, TextInputBuilder, TextInputStyle,
+  StringSelectMenuBuilder,
   ChannelType, OverwriteType, PermissionFlagsBits,
 } = require('discord.js');
 const GuildTeam = require('../models/GuildTeam');
@@ -50,7 +51,7 @@ function buildGildenEmbed(team) {
   const founded = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
 
   const fields = [
-    { name: 'Anführer', value: `<@${team.leaderId}>`, inline: true },
+    { name: 'Anführer', value: team.leaderless ? '*(Vakant)*' : `<@${team.leaderId}>`, inline: true },
     { name: 'Mitglieder', value: `${team.members.length}`, inline: true },
     { name: 'Kasse', value: formatCoins(team.treasury), inline: true },
   ];
@@ -70,7 +71,19 @@ function buildGildenEmbed(team) {
     footer: `Gegründet am ${founded}`,
   });
 
-  const row = new ActionRowBuilder().addComponents(
+  let row, row2;
+
+  if (team.leaderless) {
+    // Leiterlose Gilde: nur beitreten oder Führung übernehmen
+    row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('gilden_donate').setLabel('Spenden').setEmoji('💰').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('gilden_leave').setLabel('Verlassen').setEmoji('🚶').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('gilden_claim_leader').setLabel(`Führung übernehmen (${formatCoins(GUILD.CLAIM_COST)})`).setEmoji('👑').setStyle(ButtonStyle.Primary),
+    );
+    return { embeds: [embed], components: [row] };
+  }
+
+  row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('gilden_donate').setLabel('Spenden').setEmoji('💰').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId('gilden_invite').setLabel('Einladen').setEmoji('➕').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('gilden_kick').setLabel('Kick').setEmoji('🚪').setStyle(ButtonStyle.Secondary),
@@ -78,28 +91,45 @@ function buildGildenEmbed(team) {
     new ButtonBuilder().setCustomId('gilden_disband').setLabel('Auflösen').setEmoji('💀').setStyle(ButtonStyle.Danger),
   );
 
-  const row2 = new ActionRowBuilder().addComponents(
+  row2 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('gilden_manifest').setLabel('Manifest bearbeiten').setEmoji('📜').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('gilden_sitze_vergeben').setLabel('Sitze vergeben').setEmoji('🏛️').setStyle(ButtonStyle.Primary),
   );
 
   return { embeds: [embed], components: [row, row2] };
 }
 
-function buildNoGildePayload() {
+async function buildNoGildePayload(guildId) {
+  const leaderless = await GuildTeam.find({ guildId, leaderless: true }).lean();
+
+  let description = `Du bist noch in keiner Gilde.\n\nGründe deine eigene für **${formatCoins(GUILD.FOUND_COST)}**!`;
+  if (leaderless.length) {
+    description += '\n\n**Beitretbare Gilden (ohne Anführer):**\n' +
+      leaderless.map(t => `• **${t.name}**${t.description ? ` — *${t.description}*` : ''}`).join('\n');
+  }
+
   const embed = createEmbed({
     title: '⚔️ Gilden',
     color: COLORS.PRIMARY,
-    description: `Du bist noch in keiner Gilde.\n\nGründe deine eigene für **${formatCoins(GUILD.FOUND_COST)}**!`,
+    description,
   });
-  const row = new ActionRowBuilder().addComponents(
+
+  const buttons = [
     new ButtonBuilder().setCustomId('gilden_create').setLabel('Gilde gründen').setEmoji('⚔️').setStyle(ButtonStyle.Success),
-  );
+  ];
+  if (leaderless.length) {
+    buttons.push(
+      new ButtonBuilder().setCustomId('gilden_join').setLabel('Gilde beitreten').setEmoji('🤝').setStyle(ButtonStyle.Primary),
+    );
+  }
+
+  const row = new ActionRowBuilder().addComponents(buttons);
   return { embeds: [embed], components: [row] };
 }
 
 async function getGildenPayload(guildId, userId) {
   const team = await GuildTeam.findOne({ guildId, members: userId });
-  if (!team) return buildNoGildePayload();
+  if (!team) return buildNoGildePayload(guildId);
   return buildGildenEmbed(team);
 }
 
@@ -131,31 +161,44 @@ async function createGuildChannels(discordGuild, team) {
     resolveMarker(discordGuild, config?.gildenVoiceMarkerChannelId),
   ]);
 
-  const chatOptions = {
-    name: `💬︱${team.name.toLowerCase().replace(/\s+/g, '-')}`,
-    type: ChannelType.GuildText,
-    permissionOverwrites: overwrites,
-  };
-  if (chatMarker.parent) chatOptions.parent = chatMarker.parent;
+  let chatId = null;
+  let voiceId = null;
 
-  const voiceOptions = {
-    name: `🔊 ${team.name}`,
-    type: ChannelType.GuildVoice,
-    permissionOverwrites: overwrites,
-  };
-  if (voiceMarker.parent) voiceOptions.parent = voiceMarker.parent;
-
-  const chat = await discordGuild.channels.create(chatOptions);
-  const voice = await discordGuild.channels.create(voiceOptions);
-
-  if (chatMarker.position !== null) {
-    await chat.setPosition(chatMarker.position + 1, { relative: false }).catch(() => {});
-  }
-  if (voiceMarker.position !== null) {
-    await voice.setPosition(voiceMarker.position + 1, { relative: false }).catch(() => {});
+  // Text-Kanal — unabhängig vom Voice-Kanal
+  try {
+    const chatOptions = {
+      name: `💬︱${team.name.toLowerCase().replace(/\s+/g, '-')}`,
+      type: ChannelType.GuildText,
+      permissionOverwrites: overwrites,
+    };
+    if (chatMarker.parent) chatOptions.parent = chatMarker.parent;
+    const chat = await discordGuild.channels.create(chatOptions);
+    if (chatMarker.position !== null) {
+      await chat.setPosition(chatMarker.position + 1, { relative: false }).catch(() => {});
+    }
+    chatId = chat.id;
+  } catch (err) {
+    logger.warn(`Gilden-Textkanal für "${team.name}" konnte nicht erstellt werden: ${err.message}`);
   }
 
-  return { categoryId: null, chatId: chat.id, newsId: null, voiceId: voice.id };
+  // Voice-Kanal — unabhängig vom Text-Kanal
+  try {
+    const voiceOptions = {
+      name: `🔊 ${team.name}`,
+      type: ChannelType.GuildVoice,
+      permissionOverwrites: overwrites,
+    };
+    if (voiceMarker.parent) voiceOptions.parent = voiceMarker.parent;
+    const voice = await discordGuild.channels.create(voiceOptions);
+    if (voiceMarker.position !== null) {
+      await voice.setPosition(voiceMarker.position + 1, { relative: false }).catch(() => {});
+    }
+    voiceId = voice.id;
+  } catch (err) {
+    logger.warn(`Gilden-Voicekanal für "${team.name}" konnte nicht erstellt werden: ${err.message}`);
+  }
+
+  return { categoryId: null, chatId, newsId: null, voiceId };
 }
 
 async function deleteGuildChannels(discordGuild, team) {
@@ -438,9 +481,129 @@ async function handleManifest(interaction) {
   });
 }
 
+// ─── Leiterlose Gilde beitreten ──────────────────────────────────────────────
+
+async function handleJoin(interaction) {
+  const { guild } = interaction;
+  const existing = await GuildTeam.findOne({ guildId: guild.id, members: interaction.user.id });
+  if (existing) {
+    return interaction.reply({ content: `❌ Du bist bereits in **${existing.name}**.`, ephemeral: true });
+  }
+
+  const leaderless = await GuildTeam.find({ guildId: guild.id, leaderless: true }).lean();
+  if (!leaderless.length) {
+    return interaction.reply({ content: '❌ Keine beitretbaren Gilden vorhanden.', ephemeral: true });
+  }
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId('gilden_join_select')
+    .setPlaceholder('Gilde auswählen…')
+    .addOptions(leaderless.map(t => ({
+      label:       t.name,
+      value:       t._id.toString(),
+      description: t.description ? t.description.slice(0, 100) : 'Keine Beschreibung',
+    })));
+
+  return interaction.reply({
+    content: '🤝 Welcher Gilde möchtest du beitreten?',
+    components: [new ActionRowBuilder().addComponents(select)],
+    ephemeral: true,
+  });
+}
+
+async function handleJoinSelect(interaction) {
+  const { guild, user } = interaction;
+  const teamId = interaction.values[0];
+
+  const existing = await GuildTeam.findOne({ guildId: guild.id, members: user.id });
+  if (existing) {
+    return interaction.update({ content: `❌ Du bist bereits in **${existing.name}**.`, components: [] });
+  }
+
+  const team = await GuildTeam.findById(teamId);
+  if (!team || !team.leaderless) {
+    return interaction.update({ content: '❌ Diese Gilde ist nicht mehr beitretbar.', components: [] });
+  }
+
+  team.members.push(user.id);
+
+  // Rolle erstellen falls noch keine vorhanden
+  if (!team.roleId) {
+    try {
+      const role = await guild.roles.create({ name: team.name, mentionable: false, reason: `Gilden-Rolle: ${team.name}` });
+      team.roleId = role.id;
+    } catch (err) {
+      logger.warn(`Gilden-Rolle für "${team.name}" konnte nicht erstellt werden: ${err.message}`);
+    }
+  }
+
+  await team.save();
+
+  if (team.roleId) {
+    const member = await guild.members.fetch(user.id).catch(() => null);
+    if (member) await member.roles.add(team.roleId).catch(() => {});
+  } else {
+    syncGuildChannelPerms(guild, team).catch(() => {});
+  }
+
+  return interaction.update({ content: `✅ Du bist **${team.name}** beigetreten!`, components: [] });
+}
+
+async function handleClaimLeadership(interaction) {
+  const { guild, user } = interaction;
+
+  const team = await GuildTeam.findOne({ guildId: guild.id, members: user.id, leaderless: true });
+  if (!team) {
+    return interaction.reply({ content: '❌ Du bist in keiner führerlosen Gilde.', ephemeral: true });
+  }
+
+  try {
+    await coinService.removeCoins(guild.id, user.id, GUILD.CLAIM_COST, 'guild', `Führung übernommen: ${team.name}`);
+  } catch (err) {
+    return interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
+  }
+
+  team.leaderId  = user.id;
+  team.leaderless = false;
+
+  // Gilden-Rolle erstellen falls noch nicht vorhanden
+  if (!team.roleId) {
+    try {
+      const role = await guild.roles.create({ name: team.name, mentionable: false, reason: `Gilden-Rolle: ${team.name}` });
+      team.roleId = role.id;
+    } catch (err) {
+      logger.warn(`Gilden-Rolle für "${team.name}" konnte nicht erstellt werden: ${err.message}`);
+    }
+  }
+
+  // Rolle an alle Mitglieder vergeben (inkl. neuem Anführer)
+  if (team.roleId) {
+    for (const memberId of team.members) {
+      const member = await guild.members.fetch(memberId).catch(() => null);
+      if (member) await member.roles.add(team.roleId).catch(() => {});
+    }
+  }
+
+  // Kanäle erstellen falls noch nicht vorhanden
+  if (!team.channels?.chatId) {
+    try {
+      const channelIds = await createGuildChannels(guild, team);
+      team.channels = channelIds;
+    } catch (err) {
+      logger.warn(`Gilden-Kanäle für "${team.name}" konnten nicht erstellt werden: ${err.message}`);
+    }
+  }
+
+  await team.save();
+
+  const payload = buildGildenEmbed(team);
+  return interaction.reply({ ...payload, content: `👑 Du hast die Führung von **${team.name}** übernommen!`, ephemeral: true });
+}
+
 module.exports = {
   getGildenPayload,
   handleGildenButton,
+  createGuildChannels,
   handleCreate,
   handleDonate,
   handleInvite,
@@ -454,4 +617,7 @@ module.exports = {
   showKickModal,
   showManifestModal,
   handleManifest,
+  handleJoin,
+  handleJoinSelect,
+  handleClaimLeadership,
 };
