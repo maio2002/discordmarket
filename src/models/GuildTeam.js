@@ -12,12 +12,24 @@ const guildTeamSchema = new mongoose.Schema({
   leaderless:    { type: Boolean, default: false },
   roleId:        { type: String, default: null },
   seats:         { type: Number, default: 0 },
-  assignedSeats: { type: [String], default: [] },
+  assignedSeats:   { type: [String], default: [] },
+  pendingRequests: { type: [String], default: [] },
+  news: [{
+    content:   { type: String, required: true },
+    authorId:  { type: String, required: true },
+    createdAt: { type: Date, default: Date.now },
+  }],
   channels: {
     categoryId: { type: String, default: null },
     chatId:     { type: String, default: null },
     newsId:     { type: String, default: null },
     voiceId:    { type: String, default: null },
+  },
+  staffRoles: {
+    supporterRoleId: { type: String, default: null },
+    moderatorRoleId: { type: String, default: null },
+    adminRoleId:     { type: String, default: null },
+    teamRoleId:      { type: String, default: null },
   },
 }, { timestamps: true });
 

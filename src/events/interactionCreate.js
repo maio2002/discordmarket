@@ -1795,6 +1795,18 @@ async function handleButton(interaction) {
     const gs = require('../services/guildService');
     return gs.showManifestModal(interaction);
   }
+  if (id === 'gilden_news') {
+    const gs = require('../services/guildService');
+    return gs.handleNewsView(interaction);
+  }
+  if (id.startsWith('gilden_news_page_')) {
+    const gs = require('../services/guildService');
+    return gs.handleNewsPage(interaction);
+  }
+  if (id === 'gilden_news_add') {
+    const gs = require('../services/guildService');
+    return gs.showNewsAddModal(interaction);
+  }
   if (id === 'gilden_sitze_vergeben') {
     const ss = require('../services/seatService');
     return ss.handleSeatAssign(interaction);
@@ -1810,6 +1822,30 @@ async function handleButton(interaction) {
   if (id === 'gilden_claim_leader') {
     const gs = require('../services/guildService');
     return gs.handleClaimLeadership(interaction);
+  }
+  if (id === 'gilden_anfragen_annehmen') {
+    const gs = require('../services/guildService');
+    return gs.handleAnfragenAnnehmen(interaction);
+  }
+  if (id === 'gilden_anfragen_ablehnen') {
+    const gs = require('../services/guildService');
+    return gs.handleAnfragenAblehnen(interaction);
+  }
+  if (id === 'gilden_role_color') {
+    const gs = require('../services/guildService');
+    return gs.showRoleColorModal(interaction);
+  }
+  if (id === 'gilden_personal') {
+    const gs = require('../services/guildService');
+    return gs.handlePersonalView(interaction);
+  }
+  if (id.startsWith('gilden_personal_ernennen_') && !id.includes('_select_')) {
+    const gs = require('../services/guildService');
+    return gs.handlePersonalErnennen(interaction);
+  }
+  if (id.startsWith('gilden_personal_entlassen_') && !id.includes('_select_')) {
+    const gs = require('../services/guildService');
+    return gs.handlePersonalEntlassen(interaction);
   }
 
   // ── Serverrat Abstimmung ───────────────────────────────────────────────────
@@ -2343,6 +2379,26 @@ async function handleSelectMenu(interaction) {
   if (id === 'gilden_join_select') {
     const gs = require('../services/guildService');
     return gs.handleJoinSelect(interaction);
+  }
+
+  // ── Gilden: Anfragen annehmen / ablehnen ──────────────────────────────────
+  if (id.startsWith('gilden_anfragen_annehmen_select_')) {
+    const gs = require('../services/guildService');
+    return gs.handleAnfragenAnnehmenSelect(interaction);
+  }
+  if (id.startsWith('gilden_anfragen_ablehnen_select_')) {
+    const gs = require('../services/guildService');
+    return gs.handleAnfragenAblehnenSelect(interaction);
+  }
+
+  // ── Gilden: Personal ernennen / entlassen ─────────────────────────────────
+  if (id.startsWith('gilden_personal_ernennen_select_')) {
+    const gs = require('../services/guildService');
+    return gs.handlePersonalErnennenSelect(interaction);
+  }
+  if (id.startsWith('gilden_personal_entlassen_select_')) {
+    const gs = require('../services/guildService');
+    return gs.handlePersonalEntlassenSelect(interaction);
   }
 }
 
@@ -2990,6 +3046,14 @@ async function handleModal(interaction) {
   if (id === 'modal_gilden_manifest') {
     const gs = require('../services/guildService');
     return gs.handleManifest(interaction);
+  }
+  if (id === 'modal_gilden_news_add') {
+    const gs = require('../services/guildService');
+    return gs.handleNewsAdd(interaction);
+  }
+  if (id === 'modal_gilden_role_color') {
+    const gs = require('../services/guildService');
+    return gs.handleRoleColor(interaction);
   }
 
   // ── Serverrat Modals ───────────────────────────────────────────────────────
