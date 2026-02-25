@@ -13,7 +13,7 @@ const logger = require('../utils/logger');
 const MAX_SEATS = SEATS.MAX_SEATS;
 
 // Stimmgewicht nach Rang-Stufe
-const VOTE_WEIGHTS = [1, 1, 1, 2, 3, 5, 6, 6, 7, 9];
+const VOTE_WEIGHTS = [1, 1, 1, 2, 3, 5, 6, 7, 9, 12];
 function voteWeight(level) {
   return VOTE_WEIGHTS[level] ?? 1;
 }
@@ -85,7 +85,7 @@ function buildSeatElectionEmbed(election, teams, voteCounts) {
       { name: 'Stimmen',       value: `${totalVotes}`,        inline: true },
       { name: 'Sitze (max.)',  value: `${MAX_SEATS}`,         inline: true },
     ],
-    footer: active ? '🗳️ Wahl läuft — Stimmgewicht: Händler×2, Bürger×3, Ritter×5, Mönch×6, Priester×6, Graf×7, König×9' : '✅ Wahl beendet',
+    footer: active ? '🗳️ Wahl läuft — Stimmgewicht: Händler×2, Bürger×3, Ritter×5, Mönch×6, Priester×7, Graf×9, König×12' : '✅ Wahl beendet',
   });
 }
 

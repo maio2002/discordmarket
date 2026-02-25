@@ -1790,7 +1790,7 @@ async function handleButton(interaction) {
   }
   if (id === 'gilden_kick') {
     const gs = require('../services/guildService');
-    return gs.showKickModal(interaction);
+    return gs.showKickSelect(interaction);
   }
   if (id === 'gilden_leave') {
     const gs = require('../services/guildService');
@@ -1838,6 +1838,13 @@ async function handleButton(interaction) {
   if (id === 'gilden_claim_leader') {
     const gs = require('../services/guildService');
     return gs.handleClaimLeadership(interaction);
+  }
+  if (id.startsWith('gilden_join_claim_')) {
+    const gs = require('../services/guildService');
+    return gs.handleJoinClaimConfirm(interaction);
+  }
+  if (id === 'gilden_join_cancel') {
+    return interaction.update({ content: '❌ Abgebrochen.', embeds: [], components: [] });
   }
   if (id === 'gilden_anfragen_annehmen') {
     const gs = require('../services/guildService');
@@ -2396,7 +2403,6 @@ async function handleSelectMenu(interaction) {
     const gs = require('../services/guildService');
     return gs.handleJoinSelect(interaction);
   }
-
   // ── Gilden: Anfragen annehmen / ablehnen ──────────────────────────────────
   if (id.startsWith('gilden_anfragen_annehmen_select_')) {
     const gs = require('../services/guildService');
@@ -3055,9 +3061,9 @@ async function handleModal(interaction) {
     const gs = require('../services/guildService');
     return gs.handleInvite(interaction);
   }
-  if (id === 'modal_gilden_kick') {
+  if (id.startsWith('gilden_kick_select_')) {
     const gs = require('../services/guildService');
-    return gs.handleKick(interaction);
+    return gs.handleKickSelect(interaction);
   }
   if (id === 'modal_gilden_manifest') {
     const gs = require('../services/guildService');

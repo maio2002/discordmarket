@@ -493,14 +493,37 @@ function showInviteModal(interaction) {
   return interaction.showModal(modal);
 }
 
-function showKickModal(interaction) {
-  const modal = new ModalBuilder().setCustomId('modal_gilden_kick').setTitle('Mitglied entfernen');
-  modal.addComponents(
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('userId').setLabel('Discord-ID oder @Mention').setStyle(TextInputStyle.Short).setPlaceholder('z.B. 123456789012345678').setRequired(true),
-    ),
-  );
-  return interaction.showModal(modal);
+async function showKickSelect(interaction) {
+  const { guild, user } = interaction;
+
+  const team = await GuildTeam.findOne({ guildId: guild.id, leaderId: user.id });
+  if (!team) return interaction.reply({ content: '❌ Nur der Anführer kann Mitglieder entfernen.', ephemeral: true });
+
+  const eligible = team.members.filter(id => id !== user.id);
+  if (!eligible.length) {
+    return interaction.reply({ content: '❌ Keine Mitglieder zum Entfernen vorhanden.', ephemeral: true });
+  }
+
+  const options = [];
+  for (const memberId of eligible) {
+    const member = await guild.members.fetch(memberId).catch(() => null);
+    options.push({
+      label:       member ? member.displayName.slice(0, 100) : memberId,
+      value:       memberId,
+      description: member ? member.user.username.slice(0, 100) : 'Nutzer nicht gefunden',
+    });
+  }
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`gilden_kick_select_${team._id}`)
+    .setPlaceholder('Mitglied auswählen…')
+    .addOptions(options.slice(0, 25));
+
+  return interaction.reply({
+    content:    '🚪 Wen möchtest du aus der Gilde entfernen?',
+    components: [new ActionRowBuilder().addComponents(select)],
+    ephemeral:  true,
+  });
 }
 
 // ─── Modal-Handler ────────────────────────────────────────────────────────────
@@ -601,26 +624,30 @@ async function handleInvite(interaction) {
   return interaction.reply({ ...payload, content: `✅ <@${target.id}> wurde eingeladen!`, ephemeral: true });
 }
 
-async function handleKick(interaction) {
+async function handleKickSelect(interaction) {
+  const teamId   = interaction.customId.slice('gilden_kick_select_'.length);
   const { guild, user } = interaction;
-  const raw = interaction.fields.getTextInputValue('userId').trim().replace(/[<@!>]/g, '');
+  const targetId = interaction.values[0];
 
-  const team = await GuildTeam.findOne({ guildId: guild.id, leaderId: user.id });
-  if (!team) return interaction.reply({ content: '❌ Nur der Anführer kann Mitglieder entfernen.', ephemeral: true });
-  if (raw === user.id) return interaction.reply({ content: '❌ Du kannst dich nicht selbst kicken.', ephemeral: true });
-  if (!team.members.includes(raw)) return interaction.reply({ content: '❌ Kein Mitglied dieser Gilde.', ephemeral: true });
+  const team = await GuildTeam.findById(teamId);
+  if (!team || team.leaderId !== user.id) {
+    return interaction.update({ content: '❌ Keine Berechtigung.', components: [] });
+  }
+  if (!team.members.includes(targetId)) {
+    return interaction.update({ content: '❌ Kein Mitglied dieser Gilde.', components: [] });
+  }
 
-  team.members = team.members.filter(id => id !== raw);
+  team.members = team.members.filter(id => id !== targetId);
   await team.save();
+
   if (team.roleId) {
-    const kicked = await guild.members.fetch(raw).catch(() => null);
+    const kicked = await guild.members.fetch(targetId).catch(() => null);
     if (kicked) await kicked.roles.remove(team.roleId).catch(() => {});
   } else {
     syncGuildChannelPerms(guild, team).catch(() => {});
   }
 
-  const payload = buildGildenEmbed(team);
-  return interaction.reply({ ...payload, content: `✅ <@${raw}> wurde entfernt.`, ephemeral: true });
+  return interaction.update({ content: `✅ <@${targetId}> wurde aus der Gilde entfernt.`, components: [] });
 }
 
 function showManifestModal(interaction) {
@@ -702,32 +729,31 @@ async function handleJoinSelect(interaction) {
     return interaction.update({ content: '❌ Gilde nicht gefunden.', components: [] });
   }
 
-  // Leiterlose Gilde: direkt beitreten
+  // Leiterlose Gilde: Führungsübernahme anbieten
   if (team.leaderless) {
-    team.members.push(user.id);
-
-    if (!team.roleId) {
-      try {
-        const role = await guild.roles.create({ name: team.name, mentionable: false, reason: `Gilden-Rolle: ${team.name}` });
-        team.roleId = role.id;
-      } catch (err) {
-        logger.warn(`Gilden-Rolle für "${team.name}" konnte nicht erstellt werden: ${err.message}`);
-      }
-    }
-
-    await team.save();
-
-    if (team.roleId) {
-      const member = await guild.members.fetch(user.id).catch(() => null);
-      if (member) await member.roles.add(team.roleId).catch(() => {});
-    } else {
-      syncGuildChannelPerms(guild, team).catch(() => {});
-    }
-
-    return interaction.update({ content: `✅ Du bist **${team.name}** beigetreten!`, components: [] });
+    const embed = createEmbed({
+      title: `👑 Führung übernehmen`,
+      color: COLORS.PRIMARY,
+      description:
+        `**${team.name}** hat keinen Anführer.\n\n` +
+        `Möchtest du die Führung für **${formatCoins(GUILD.CLAIM_COST)}** übernehmen?`,
+    });
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`gilden_join_claim_${team._id}`)
+        .setLabel(`Führung übernehmen (${formatCoins(GUILD.CLAIM_COST)})`)
+        .setEmoji('👑')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId('gilden_join_cancel')
+        .setLabel('Abbrechen')
+        .setEmoji('❌')
+        .setStyle(ButtonStyle.Secondary),
+    );
+    return interaction.update({ embeds: [embed], components: [row] });
   }
 
-  // Gilde mit Anführer: Anfrage in DB speichern
+  // Gilde mit Anführer: Anfrage senden
   if (team.pendingRequests.includes(user.id)) {
     return interaction.update({ content: `❌ Du hast bereits eine offene Anfrage bei **${team.name}**.`, components: [] });
   }
@@ -736,6 +762,60 @@ async function handleJoinSelect(interaction) {
   await team.save();
 
   return interaction.update({ content: `✅ Deine Beitrittsanfrage wurde an den Anführer von **${team.name}** gesendet! Er sieht sie in seinem Gilden-Menü.`, components: [] });
+}
+
+async function handleJoinClaimConfirm(interaction) {
+  const teamId = interaction.customId.slice('gilden_join_claim_'.length);
+  const { guild, user } = interaction;
+
+  const existing = await GuildTeam.findOne({ guildId: guild.id, members: user.id });
+  if (existing) {
+    return interaction.update({ content: `❌ Du bist bereits in **${existing.name}**.`, embeds: [], components: [] });
+  }
+
+  const team = await GuildTeam.findById(teamId);
+  if (!team || !team.leaderless) {
+    return interaction.update({ content: '❌ Diese Gilde hat bereits einen Anführer.', embeds: [], components: [] });
+  }
+
+  try {
+    await coinService.removeCoins(guild.id, user.id, GUILD.CLAIM_COST, 'guild', `Führung übernommen: ${team.name}`);
+  } catch (err) {
+    return interaction.update({ content: `❌ ${err.message}`, embeds: [], components: [] });
+  }
+
+  team.leaderId   = user.id;
+  team.leaderless = false;
+  if (!team.members.includes(user.id)) team.members.push(user.id);
+
+  if (!team.roleId) {
+    try {
+      const role = await guild.roles.create({ name: team.name, mentionable: false, reason: `Gilden-Rolle: ${team.name}` });
+      team.roleId = role.id;
+    } catch (err) {
+      logger.warn(`Gilden-Rolle für "${team.name}" konnte nicht erstellt werden: ${err.message}`);
+    }
+  }
+
+  if (team.roleId) {
+    for (const memberId of team.members) {
+      const member = await guild.members.fetch(memberId).catch(() => null);
+      if (member) await member.roles.add(team.roleId).catch(() => {});
+    }
+  }
+
+  if (!team.channels?.chatId) {
+    try {
+      const channelIds = await createGuildChannels(guild, team);
+      team.channels = channelIds;
+    } catch (err) {
+      logger.warn(`Gilden-Kanäle für "${team.name}" konnten nicht erstellt werden: ${err.message}`);
+    }
+  }
+
+  await team.save();
+
+  return interaction.update({ content: `👑 Du hast die Führung von **${team.name}** übernommen!`, embeds: [], components: [] });
 }
 
 async function handleAnfragenAnnehmen(interaction) {
@@ -1273,18 +1353,19 @@ module.exports = {
   handleCreate,
   handleDonate,
   handleInvite,
-  handleKick,
+  showKickSelect,
+  handleKickSelect,
   handleLeave,
   handleDisbandConfirm,
   handleDisbandExecute,
   showCreateModal,
   showDonateModal,
   showInviteModal,
-  showKickModal,
   showManifestModal,
   handleManifest,
   handleJoin,
   handleJoinSelect,
+  handleJoinClaimConfirm,
   handleAnfragenAnnehmen,
   handleAnfragenAnnehmenSelect,
   handleAnfragenAblehnen,

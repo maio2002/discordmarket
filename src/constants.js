@@ -59,7 +59,7 @@ module.exports = {
   },
   SEATS: {
     MAX_SEATS:      67,
-    ELECTION_DAYS:  7,   // Wie viele Tage die Wahl läuft
+    ELECTION_DAYS:  3,   // Wie viele Tage die Wahl läuft
   },
   GUILD: {
     FOUND_COST:  5000,
