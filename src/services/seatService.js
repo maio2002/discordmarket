@@ -309,6 +309,19 @@ async function handleSeatAssignSelect(interaction) {
 
   const config = await GuildConfig.findOne({ guildId: guild.id });
   const member  = await guild.members.fetch(targetId).catch(() => null);
+
+  // Sitz-Rolle automatisch erstellen falls nicht konfiguriert
+  if (config && !config.sitzRoleId) {
+    try {
+      const role = await guild.roles.create({ name: 'Ratsabgeordneter', mentionable: false, reason: 'Sitz-Rolle automatisch erstellt' });
+      config.sitzRoleId = role.id;
+      await config.save();
+      logger.info(`Sitz-Rolle für Guild ${guild.id} automatisch erstellt: ${role.id}`);
+    } catch (err) {
+      logger.warn(`Sitz-Rolle konnte nicht erstellt werden: ${err.message}`);
+    }
+  }
+
   if (config?.sitzRoleId && member) await member.roles.add(config.sitzRoleId).catch(() => {});
 
   return interaction.update({

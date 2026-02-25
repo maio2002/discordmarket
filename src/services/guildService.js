@@ -94,6 +94,7 @@ function buildGildenEmbed(team) {
   row2 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('gilden_manifest').setLabel('Manifest bearbeiten').setEmoji('📜').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('gilden_sitze_vergeben').setLabel('Sitze vergeben').setEmoji('🏛️').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('gilden_sitze_entziehen').setLabel('Sitz entziehen').setEmoji('🪑').setStyle(ButtonStyle.Danger),
   );
 
   return { embeds: [embed], components: [row, row2] };

@@ -1799,6 +1799,10 @@ async function handleButton(interaction) {
     const ss = require('../services/seatService');
     return ss.handleSeatAssign(interaction);
   }
+  if (id === 'gilden_sitze_entziehen') {
+    const ss = require('../services/seatService');
+    return ss.handleSeatRevoke(interaction);
+  }
   if (id === 'gilden_join') {
     const gs = require('../services/guildService');
     return gs.handleJoin(interaction);

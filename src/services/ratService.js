@@ -175,7 +175,7 @@ async function handleAutoVoteThread(thread) {
 
   const embed = buildProposalEmbed(proposal, team);
   const voteMsg = await thread.send({
-    content: `🗳️ **Abstimmung gestartet!** Gildenführer können abstimmen.`,
+    content: `🗳️ **Abstimmung gestartet!**`,
     embeds: [embed],
     components: [buildProposalButtons(proposal._id)],
   });
