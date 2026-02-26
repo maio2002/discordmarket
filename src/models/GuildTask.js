@@ -6,12 +6,19 @@ const guildTaskSchema = new Schema({
   title:       { type: String, required: true },
   description: { type: String, default: null },
   reward:      { type: Number, required: true },
-  status:      { type: String, enum: ['open', 'claimed', 'submitted', 'completed', 'rejected'], default: 'open' },
-  claimedBy:   { type: String, default: null },
-  channelId:   { type: String, default: null },
-  createdAt:   { type: Date, default: Date.now },
+  type:        { type: String, enum: ['einmalig', 'dauerhaft'], required: true },
+  slots:       { type: Number, default: 1 },
+  applicants:  { type: [String], default: [] },
+  assignees: [{
+    userId:      { type: String, required: true },
+    channelId:   { type: String, default: null },
+    assignedAt:  { type: Date, default: Date.now },
+    submittedAt: { type: Date, default: null },
+    status:      { type: String, enum: ['active', 'submitted'], default: 'active' },
+  }],
+  createdAt: { type: Date, default: Date.now },
 });
 
-guildTaskSchema.index({ guildId: 1, teamId: 1, status: 1 });
+guildTaskSchema.index({ guildId: 1, teamId: 1 });
 
 module.exports = model('GuildTask', guildTaskSchema);

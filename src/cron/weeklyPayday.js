@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const jobService = require('../services/jobService');
 const coinService = require('../services/coinService');
 const GuildTeam = require('../models/GuildTeam');
+const GuildTask = require('../models/GuildTask');
 const logger = require('../utils/logger');
 
 async function distributeGuildSalaries(guildId) {
@@ -23,18 +24,21 @@ async function distributeGuildSalaries(guildId) {
       }
     }
 
-    // 2. Gildenjobs auszahlen (nur besetzte Stellen)
-    for (const job of team.guildJobs.filter(j => j.status === 'filled')) {
-      if (team.treasury >= job.salary) {
-        try {
-          await coinService.addCoins(guildId, job.userId, job.salary, 'guild_salary', `Gildenjob: ${job.title} (${team.name})`);
-          team.treasury -= job.salary;
-          paid++;
-        } catch (err) {
-          logger.error(`Gildenlohn-Fehler für ${job.userId}:`, err);
+    // 2. Dauerhafte Aufgaben auszahlen
+    const dauerhaftTasks = await GuildTask.find({ teamId: team._id.toString(), type: 'dauerhaft' });
+    for (const task of dauerhaftTasks) {
+      for (const assignee of task.assignees) {
+        if (team.treasury >= task.reward) {
+          try {
+            await coinService.addCoins(guildId, assignee.userId, task.reward, 'guild_salary', `Dauerhafte Aufgabe: ${task.title} (${team.name})`);
+            team.treasury -= task.reward;
+            paid++;
+          } catch (err) {
+            logger.error(`Gildenlohn-Fehler für ${assignee.userId}:`, err);
+          }
+        } else {
+          logger.warn(`Gilde "${team.name}": Kasse reicht nicht für Gehalt von ${assignee.userId} (${task.title}).`);
         }
-      } else {
-        logger.warn(`Gilde "${team.name}": Kasse reicht nicht für Gehalt von ${job.userId} (${job.title}).`);
       }
     }
 

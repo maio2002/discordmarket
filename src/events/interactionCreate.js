@@ -2057,54 +2057,46 @@ async function handleButton(interaction) {
     return ss.handleSeatVoteButton(interaction);
   }
 
-  // ── Gilden-Tasks (Buttons) ─────────────────────────────────────────────────
-  if (id === 'gilden_tasks_manage') {
+  // ── Gilden-Aufgaben (Buttons) ──────────────────────────────────────────────
+  if (id === 'gilden_aufgaben_manage') {
     const gs = require('../services/guildService');
-    return gs.handleTasksManage(interaction);
+    return gs.handleAufgabenManage(interaction);
   }
-  if (id === 'gilden_tasks_view') {
+  if (id === 'gilden_aufgaben_view') {
     const gs = require('../services/guildService');
-    return gs.handleTasksView(interaction);
+    return gs.handleAufgabenView(interaction);
   }
-  if (id === 'gilden_task_create') {
+  if (id === 'aufgabe_create_einmalig') {
     const gs = require('../services/guildService');
-    return gs.showTaskCreateModal(interaction);
+    return gs.showCreateAufgabeModal(interaction, 'einmalig');
   }
-  if (id.startsWith('gilden_task_submit_')) {
+  if (id === 'aufgabe_create_dauerhaft') {
     const gs = require('../services/guildService');
-    return gs.handleTaskSubmit(interaction);
+    return gs.showCreateAufgabeModal(interaction, 'dauerhaft');
   }
-  if (id.startsWith('gilden_task_approve_')) {
+  if (id === 'aufgabe_applications') {
     const gs = require('../services/guildService');
-    return gs.handleTaskApprove(interaction);
+    return gs.showAufgabeApplicationsSelect(interaction);
   }
-  if (id.startsWith('gilden_task_reject_')) {
+  if (id === 'aufgabe_remove') {
     const gs = require('../services/guildService');
-    return gs.handleTaskReject(interaction);
+    return gs.showAufgabeDeleteSelect(interaction);
   }
-  if (id === 'gilden_jobs_manage') {
-    const gs = require('../services/guildService');
-    return gs.handleJobsManage(interaction);
-  }
-  if (id === 'gilden_job_beitrag') {
+  if (id === 'aufgabe_beitrag') {
     const gs = require('../services/guildService');
     return gs.showSetContributionModal(interaction);
   }
-  if (id === 'gilden_job_post') {
+  if (id.startsWith('aufgabe_submit_')) {
     const gs = require('../services/guildService');
-    return gs.showPostJobModal(interaction);
+    return gs.handleAufgabeSubmit(interaction);
   }
-  if (id === 'gilden_job_applications') {
+  if (id.startsWith('aufgabe_approve_')) {
     const gs = require('../services/guildService');
-    return gs.showApplicationsJobSelect(interaction);
+    return gs.handleAufgabeApprove(interaction);
   }
-  if (id === 'gilden_job_remove') {
+  if (id.startsWith('aufgabe_reject_')) {
     const gs = require('../services/guildService');
-    return gs.showRemoveJobSelect(interaction);
-  }
-  if (id === 'gilden_jobs_view') {
-    const gs = require('../services/guildService');
-    return gs.handleJobsView(interaction);
+    return gs.handleAufgabeReject(interaction);
   }
 }
 
@@ -2659,32 +2651,22 @@ async function handleSelectMenu(interaction) {
     return gs.handlePersonalEntlassenSelect(interaction);
   }
 
-  // ── Gilden-Tasks (Select) ──────────────────────────────────────────────────
-  if (id === 'gilden_task_claim_select') {
+  // ── Gilden-Aufgaben (Select) ───────────────────────────────────────────────
+  if (id === 'aufgabe_apply_select') {
     const gs = require('../services/guildService');
-    return gs.handleTaskClaimSelect(interaction);
+    return gs.handleAufgabeApplySelect(interaction);
   }
-  if (id === 'gilden_task_delete_select') {
+  if (id === 'aufgabe_applications_select') {
     const gs = require('../services/guildService');
-    return gs.handleTaskDeleteSelect(interaction);
+    return gs.handleAufgabeApplicationsSelect(interaction);
   }
-
-  // ── Gildenjobs (Select) ────────────────────────────────────────────────────
-  if (id === 'gilden_job_applications_select') {
+  if (id.startsWith('aufgabe_applicant_select_')) {
     const gs = require('../services/guildService');
-    return gs.handleApplicationsJobSelect(interaction);
+    return gs.handleAufgabeApplicantSelect(interaction);
   }
-  if (id.startsWith('gilden_job_applicant_select_')) {
+  if (id === 'aufgabe_delete_select') {
     const gs = require('../services/guildService');
-    return gs.handleApplicationApplicantSelect(interaction);
-  }
-  if (id === 'gilden_job_apply_select') {
-    const gs = require('../services/guildService');
-    return gs.handleJobApplySelect(interaction);
-  }
-  if (id === 'gilden_job_remove_select') {
-    const gs = require('../services/guildService');
-    return gs.handleRemoveJobSelect(interaction);
+    return gs.handleAufgabeDeleteSelect(interaction);
   }
 }
 
@@ -3341,17 +3323,17 @@ async function handleModal(interaction) {
     const gs = require('../services/guildService');
     return gs.handleRoleColor(interaction);
   }
-  if (id === 'modal_gilden_task_create') {
+  if (id === 'modal_aufgabe_einmalig') {
     const gs = require('../services/guildService');
-    return gs.handleTaskCreate(interaction);
+    return gs.handleCreateAufgabe(interaction, 'einmalig');
+  }
+  if (id === 'modal_aufgabe_dauerhaft') {
+    const gs = require('../services/guildService');
+    return gs.handleCreateAufgabe(interaction, 'dauerhaft');
   }
   if (id === 'modal_guild_job_beitrag') {
     const gs = require('../services/guildService');
     return gs.handleSetContribution(interaction);
-  }
-  if (id === 'modal_guild_job_post') {
-    const gs = require('../services/guildService');
-    return gs.handlePostJob(interaction);
   }
 
   // ── Serverrat Modals ───────────────────────────────────────────────────────

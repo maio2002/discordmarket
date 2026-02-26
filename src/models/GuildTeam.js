@@ -33,15 +33,6 @@ const guildTeamSchema = new mongoose.Schema({
   },
   weeklyContribution:  { type: Number, default: 0 },
   memberContributions: { type: Map, of: Number, default: {} },
-  guildJobs: [{
-    userId:     { type: String, default: null },
-    title:      { type: String, required: true },
-    salary:     { type: Number, required: true },
-    assignedBy: { type: String, required: true },
-    assignedAt: { type: Date, default: null },
-    status:     { type: String, enum: ['open', 'filled'], default: 'open' },
-    applicants: { type: [String], default: [] },
-  }],
 }, { timestamps: true });
 
 guildTeamSchema.index({ guildId: 1, name: 1 }, { unique: true });
