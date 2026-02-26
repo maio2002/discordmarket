@@ -173,8 +173,8 @@ async function handleButton(interaction) {
   if (id === 'dm_delete' || id === 'dm_gelesen') {
     try {
       await interaction.message.delete();
-    } catch (err) {
-      await interaction.reply({ content: '✅ Nachricht wurde gelöscht.' }).catch(() => {});
+    } catch {
+      await interaction.deferUpdate().catch(() => {});
     }
     return;
   }
@@ -1389,10 +1389,22 @@ async function handleButton(interaction) {
       return interaction.reply({ embeds: [embed], components: [new ActionRowBuilder().addComponents(muteButton)], ephemeral: true });
     }
 
+    // Displaynamen für guild_join-Sender voraufladen
+    const guildJoinNames = {};
+    for (const o of offers.filter(o => o.type === 'guild_join')) {
+      if (!guildJoinNames[o.senderId]) {
+        const m = await interaction.guild.members.fetch(o.senderId).catch(() => null);
+        guildJoinNames[o.senderId] = m ? m.displayName : `Nutzer ${o.senderId}`;
+      }
+    }
+
     const isRequest = (o) => o.senderRole === 'auftraggeber';
     const lines = offers.map((o, i) => {
       if (o.type === 'notification') {
         return `**${i + 1}.** 🔔 ${o.description}`;
+      }
+      if (o.type === 'guild_join') {
+        return `**${i + 1}.** 🤝 Beitrittsanfrage von **${guildJoinNames[o.senderId]}**`;
       }
       if (o.type === 'role') {
         if (isRequest(o)) {
@@ -1453,7 +1465,10 @@ async function handleButton(interaction) {
       .addOptions(actionableOffers.map((o) => {
         let label, desc;
         const req = o.senderRole === 'auftraggeber';
-        if (o.type === 'role') {
+        if (o.type === 'guild_join') {
+          label = `🤝 Beitrittsanfrage`;
+          desc = `von ${guildJoinNames[o.senderId] ?? o.senderId}`;
+        } else if (o.type === 'role') {
           label = req ? `📥 Rollenanfrage: ${o.roleName || 'Unbekannt'}` : `🏷️ Rollenangebot: ${o.roleName || 'Unbekannt'}`;
           desc = formatCoins(o.price || 0);
         } else if (o.type === 'service') {
@@ -1500,6 +1515,32 @@ async function handleButton(interaction) {
 
     if (!offer || offer.status !== 'pending') {
       return interaction.reply({ content: '❌ Dieses Angebot ist nicht mehr gültig.', ephemeral: true });
+    }
+
+    if (offer.type === 'guild_join') {
+      const GuildTeam = require('../models/GuildTeam');
+      const team = await GuildTeam.findById(offer.channelId).lean();
+      const teamName = team ? team.name : 'Unbekannte Gilde';
+      const requesterMember = await interaction.guild.members.fetch(offer.senderId).catch(() => null);
+      const requesterName = requesterMember ? requesterMember.displayName : `Nutzer ${offer.senderId}`;
+      const embed = createEmbed({
+        title: '🤝 Beitrittsanfrage',
+        color: COLORS.PRIMARY,
+        description: `**${requesterName}** möchte der Gilde **${teamName}** beitreten.`,
+      });
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`guild_join_accept_${offer._id}`)
+          .setLabel('Annehmen')
+          .setEmoji('✅')
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId(`guild_join_deny_${offer._id}`)
+          .setLabel('Ablehnen')
+          .setEmoji('❌')
+          .setStyle(ButtonStyle.Danger),
+      );
+      return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
     }
 
     const isReq = offer.senderRole === 'auftraggeber';
@@ -1846,6 +1887,118 @@ async function handleButton(interaction) {
   if (id === 'gilden_join_cancel') {
     return interaction.update({ content: '❌ Abgebrochen.', embeds: [], components: [] });
   }
+
+  // Beitrittsanfrage direkt aus Postfach annehmen
+  if (id.startsWith('guild_join_accept_')) {
+    const Offer = require('../models/Offer');
+    const GuildTeam = require('../models/GuildTeam');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const offerId = id.replace('guild_join_accept_', '');
+    const offer = await Offer.findById(offerId);
+
+    if (!offer || offer.status !== 'pending') {
+      return interaction.update({ content: '❌ Diese Anfrage ist nicht mehr gültig.', embeds: [], components: [] });
+    }
+    if (interaction.user.id !== offer.targetId) {
+      return interaction.reply({ content: '❌ Diese Anfrage ist nicht für dich.', ephemeral: true });
+    }
+
+    const team = await GuildTeam.findById(offer.channelId);
+    if (!team || team.leaderId !== interaction.user.id) {
+      offer.status = 'denied';
+      await offer.save();
+      return interaction.update({ content: '❌ Du bist nicht mehr Anführer dieser Gilde.', embeds: [], components: [] });
+    }
+
+    const requesterId = offer.senderId;
+    team.pendingRequests = (team.pendingRequests ?? []).filter(id => id !== requesterId);
+
+    const alreadyMember = team.members.includes(requesterId);
+    const otherTeam = alreadyMember ? null : await GuildTeam.findOne({ guildId: team.guildId, members: requesterId });
+    if (otherTeam) {
+      team.pendingRequests = team.pendingRequests.filter(id => id !== requesterId);
+      await team.save();
+      offer.status = 'denied';
+      await offer.save();
+      return interaction.update({ content: `❌ <@${requesterId}> ist bereits in einer anderen Gilde.`, embeds: [], components: [] });
+    }
+
+    if (!alreadyMember) team.members.push(requesterId);
+    await team.save();
+
+    const member = await interaction.guild.members.fetch(requesterId).catch(() => null);
+    if (team.roleId && member) await member.roles.add(team.roleId).catch(() => {});
+
+    offer.status = 'accepted';
+    await offer.save();
+
+    const { sendDmNotification } = require('../utils/dmNotification');
+    sendDmNotification(interaction.client, team.guildId, requesterId,
+      `✅ Deine Beitrittsanfrage bei **${team.name}** wurde angenommen! Du bist jetzt Mitglied.`);
+    await Offer.create({
+      guildId:     team.guildId,
+      senderId:    interaction.user.id,
+      targetId:    requesterId,
+      type:        'notification',
+      description: `✅ Deine Beitrittsanfrage bei **${team.name}** wurde angenommen! Du bist jetzt Mitglied.`,
+      price:       0,
+    });
+
+    const embed = createEmbed({
+      title: '✅ Anfrage angenommen',
+      color: COLORS.SUCCESS,
+      description: `<@${requesterId}> wurde in **${team.name}** aufgenommen!`,
+    });
+    return interaction.update({ embeds: [embed], components: [] });
+  }
+
+  // Beitrittsanfrage direkt aus Postfach ablehnen
+  if (id.startsWith('guild_join_deny_')) {
+    const Offer = require('../models/Offer');
+    const GuildTeam = require('../models/GuildTeam');
+    const { createEmbed, COLORS } = require('../utils/embedBuilder');
+    const offerId = id.replace('guild_join_deny_', '');
+    const offer = await Offer.findById(offerId);
+
+    if (!offer || offer.status !== 'pending') {
+      return interaction.update({ content: '❌ Diese Anfrage ist nicht mehr gültig.', embeds: [], components: [] });
+    }
+    if (interaction.user.id !== offer.targetId) {
+      return interaction.reply({ content: '❌ Diese Anfrage ist nicht für dich.', ephemeral: true });
+    }
+
+    const team = await GuildTeam.findById(offer.channelId);
+    const requesterId = offer.senderId;
+    const teamName = team ? team.name : 'die Gilde';
+
+    if (team) {
+      team.pendingRequests = (team.pendingRequests ?? []).filter(id => id !== requesterId);
+      await team.save();
+    }
+
+    offer.status = 'denied';
+    await offer.save();
+
+    const { sendDmNotification } = require('../utils/dmNotification');
+    sendDmNotification(interaction.client, offer.guildId, requesterId,
+      `❌ Deine Beitrittsanfrage bei **${teamName}** wurde abgelehnt.`);
+    await Offer.create({
+      guildId:     offer.guildId,
+      senderId:    interaction.user.id,
+      targetId:    requesterId,
+      type:        'notification',
+      description: `❌ Deine Beitrittsanfrage bei **${teamName}** wurde abgelehnt.`,
+      price:       0,
+    });
+
+    const embed = createEmbed({
+      title: '❌ Anfrage abgelehnt',
+      color: COLORS.ERROR,
+      description: `Beitrittsanfrage von <@${requesterId}> wurde abgelehnt.`,
+    });
+    return interaction.update({ embeds: [embed], components: [] });
+  }
+
   if (id === 'gilden_anfragen_annehmen') {
     const gs = require('../services/guildService');
     return gs.handleAnfragenAnnehmen(interaction);
@@ -2247,6 +2400,32 @@ async function handleSelectMenu(interaction) {
 
     if (!offer || offer.status !== 'pending') {
       return interaction.reply({ content: '❌ Dieses Angebot ist nicht mehr gültig.', ephemeral: true });
+    }
+
+    if (offer.type === 'guild_join') {
+      const GuildTeam = require('../models/GuildTeam');
+      const team = await GuildTeam.findById(offer.channelId).lean();
+      const teamName = team ? team.name : 'Unbekannte Gilde';
+      const requesterMember = await interaction.guild.members.fetch(offer.senderId).catch(() => null);
+      const requesterName = requesterMember ? requesterMember.displayName : `Nutzer ${offer.senderId}`;
+      const embed = createEmbed({
+        title: '🤝 Beitrittsanfrage',
+        color: COLORS.PRIMARY,
+        description: `**${requesterName}** möchte der Gilde **${teamName}** beitreten.`,
+      });
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`guild_join_accept_${offer._id}`)
+          .setLabel('Annehmen')
+          .setEmoji('✅')
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId(`guild_join_deny_${offer._id}`)
+          .setLabel('Ablehnen')
+          .setEmoji('❌')
+          .setStyle(ButtonStyle.Danger),
+      );
+      return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
     }
 
     const isReq = offer.senderRole === 'auftraggeber';

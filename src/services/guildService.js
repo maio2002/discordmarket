@@ -10,6 +10,8 @@ const { createEmbed, COLORS } = require('../utils/embedBuilder');
 const { formatCoins, formatNumber } = require('../utils/formatters');
 const { GUILD } = require('../constants');
 const logger = require('../utils/logger');
+const { sendDmNotification } = require('../utils/dmNotification');
+const Offer = require('../models/Offer');
 
 // ─── Personal-Konfiguration ──────────────────────────────────────────────────
 
@@ -162,7 +164,7 @@ function buildManagePayload(team) {
 
   let description = '🔧 Verwalte deine Gilde.';
   if (pending.length > 0) {
-    description += `\n\n📥 **${pending.length} offene Beitrittsanfrage(n):** ${pending.map(id => `<@${id}>`).join(', ')}`;
+    description += `\n\n📥 **${pending.length} offene Beitrittsanfrage(n):** ${pending.map(id => `<@${id}>`).join(', ')}\n*Öffne dein Postfach unter Kontostand, um Anfragen anzunehmen oder abzulehnen.*`;
   }
 
   const embed = createEmbed({
@@ -195,13 +197,6 @@ function buildManagePayload(team) {
   }
 
   const components = [row1, new ActionRowBuilder().addComponents(row2Buttons)];
-
-  if (pending.length > 0) {
-    components.push(new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('gilden_anfragen_annehmen').setLabel(`Annehmen (${pending.length})`).setEmoji('✅').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('gilden_anfragen_ablehnen').setLabel('Ablehnen').setEmoji('❌').setStyle(ButtonStyle.Danger),
-    ));
-  }
 
   return { embeds: [embed], components };
 }
@@ -761,6 +756,22 @@ async function handleJoinSelect(interaction) {
   team.pendingRequests.push(user.id);
   await team.save();
 
+  sendDmNotification(
+    interaction.client,
+    guild.id,
+    team.leaderId,
+    `📥 <@${user.id}> möchte der Gilde **${team.name}** beitreten.`,
+  );
+
+  await Offer.create({
+    guildId:   guild.id,
+    senderId:  user.id,
+    targetId:  team.leaderId,
+    type:      'guild_join',
+    channelId: team._id.toString(),
+    price:     0,
+  });
+
   return interaction.update({ content: `✅ Deine Beitrittsanfrage wurde an den Anführer von **${team.name}** gesendet! Er sieht sie in seinem Gilden-Menü.`, components: [] });
 }
 
@@ -875,6 +886,17 @@ async function handleAnfragenAnnehmenSelect(interaction) {
   if (team.roleId && member) await member.roles.add(team.roleId).catch(() => {});
   else syncGuildChannelPerms(guild, team).catch(() => {});
 
+  sendDmNotification(interaction.client, guild.id, targetId, `✅ Deine Beitrittsanfrage bei **${team.name}** wurde angenommen! Du bist jetzt Mitglied.`);
+
+  await Offer.create({
+    guildId:     guild.id,
+    senderId:    user.id,
+    targetId,
+    type:        'notification',
+    description: `✅ Deine Beitrittsanfrage bei **${team.name}** wurde angenommen! Du bist jetzt Mitglied.`,
+    price:       0,
+  });
+
   return interaction.update({ content: `✅ <@${targetId}> wurde in **${team.name}** aufgenommen!`, components: [] });
 }
 
@@ -920,6 +942,17 @@ async function handleAnfragenAblehnenSelect(interaction) {
 
   team.pendingRequests = team.pendingRequests.filter(id => id !== targetId);
   await team.save();
+
+  sendDmNotification(interaction.client, team.guildId, targetId, `❌ Deine Beitrittsanfrage bei **${team.name}** wurde abgelehnt.`);
+
+  await Offer.create({
+    guildId:     team.guildId,
+    senderId:    user.id,
+    targetId,
+    type:        'notification',
+    description: `❌ Deine Beitrittsanfrage bei **${team.name}** wurde abgelehnt.`,
+    price:       0,
+  });
 
   return interaction.update({ content: `❌ Beitrittsanfrage von <@${targetId}> abgelehnt.`, components: [] });
 }

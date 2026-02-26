@@ -4,7 +4,7 @@ const offerSchema = new Schema({
   guildId:     { type: String, required: true },
   senderId:    { type: String, required: true },
   targetId:    { type: String, required: true },
-  type:        { type: String, enum: ['coins', 'offer', 'role', 'service', 'notification'], required: true },
+  type:        { type: String, enum: ['coins', 'offer', 'role', 'service', 'notification', 'guild_join'], required: true },
   description: { type: String, default: null },
   price:       { type: Number, default: 0 },
   roleId:      { type: String, default: null },
