@@ -11,6 +11,7 @@ const transactionSchema = new mongoose.Schema({
       'weekly_bonus', 'job_salary', 'levelup',
       'role_purchase', 'own_role', 'prestige', 'trade', 'service', 'shop',
       'admin_give', 'admin_remove', 'speaker', 'examination', 'quest', 'guild',
+      'guild_salary', 'guild_contribution',
     ],
     required: true,
   },

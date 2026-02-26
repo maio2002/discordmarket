@@ -104,6 +104,24 @@ function buildGildenEmbed(team, viewerId = null) {
   const bar = buildProgressBar(team.treasury);
   if (bar) fields.push({ name: 'Nächste Stufe', value: bar });
 
+  // Wochenbeiträge anzeigen
+  const contribLines = team.members.map(id => {
+    const personal = team.memberContributions?.get(id);
+    const amount   = personal != null ? personal : (team.weeklyContribution ?? 0);
+    const tag      = personal != null ? '' : ' *(Standard)*';
+    return amount > 0 ? `• <@${id}> — ${formatCoins(amount)}/Woche${tag}` : null;
+  }).filter(Boolean);
+  if (contribLines.length > 0) {
+    const totalContrib = team.members.reduce((sum, id) => {
+      const personal = team.memberContributions?.get(id);
+      return sum + (personal != null ? personal : (team.weeklyContribution ?? 0));
+    }, 0);
+    fields.push({
+      name: `📅 Wochenbeiträge — gesamt ${formatCoins(totalContrib)}/Woche`,
+      value: contribLines.join('\n'),
+    });
+  }
+
   const REWARD_LIST = [
     { level: 1, emoji: '🎨', label: 'Gilden-Rolle anpassen' },
     { level: 2, emoji: '🛡️', label: 'Supporter ernennen (Muten/Timeouten)' },
@@ -129,9 +147,11 @@ function buildGildenEmbed(team, viewerId = null) {
   // Basis-Buttons für alle Mitglieder
   const rowButtons = [
     new ButtonBuilder().setCustomId('gilden_donate').setLabel('Spenden').setEmoji('💰').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId('gilden_leave').setLabel('Verlassen').setEmoji('🚶').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('gilden_news').setLabel('News').setEmoji('📰').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('gilden_tasks_view').setLabel('Tasks').setEmoji('📋').setStyle(ButtonStyle.Secondary),
   ];
+
+  const isLeader = viewerId && team.leaderId === viewerId;
 
   if (team.leaderless) {
     rowButtons.push(
@@ -141,18 +161,27 @@ function buildGildenEmbed(team, viewerId = null) {
         .setEmoji('👑')
         .setStyle(ButtonStyle.Primary),
     );
+  } else if (isLeader) {
+    rowButtons.push(
+      new ButtonBuilder()
+        .setCustomId('gilden_manage')
+        .setLabel('Verwalten')
+        .setEmoji('🔧')
+        .setStyle(ButtonStyle.Primary),
+    );
   } else {
-    const isLeader = viewerId && team.leaderId === viewerId;
-    if (isLeader) {
-      rowButtons.push(
-        new ButtonBuilder()
-          .setCustomId('gilden_manage')
-          .setLabel('Verwalten')
-          .setEmoji('🔧')
-          .setStyle(ButtonStyle.Primary),
-      );
-    }
+    rowButtons.push(
+      new ButtonBuilder()
+        .setCustomId('gilden_jobs_view')
+        .setLabel('Stellen')
+        .setEmoji('💼')
+        .setStyle(ButtonStyle.Secondary),
+    );
   }
+
+  rowButtons.push(
+    new ButtonBuilder().setCustomId('gilden_leave').setLabel('Verlassen').setEmoji('🚶').setStyle(ButtonStyle.Danger),
+  );
 
   return { embeds: [embed], components: [new ActionRowBuilder().addComponents(rowButtons)] };
 }
@@ -177,11 +206,12 @@ function buildManagePayload(team) {
     new ButtonBuilder().setCustomId('gilden_invite').setLabel('Einladen').setEmoji('➕').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('gilden_kick').setLabel('Kick').setEmoji('🚪').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('gilden_manifest').setLabel('Manifest').setEmoji('📜').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('gilden_news').setLabel('News').setEmoji('📰').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('gilden_tasks_manage').setLabel('Tasks').setEmoji('📋').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('gilden_disband').setLabel('Auflösen').setEmoji('💀').setStyle(ButtonStyle.Danger),
   );
 
   const row2Buttons = [
+    new ButtonBuilder().setCustomId('gilden_jobs_manage').setLabel('Jobs').setEmoji('💼').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('gilden_sitze_vergeben').setLabel('Sitze vergeben').setEmoji('🏛️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('gilden_sitze_entziehen').setLabel('Sitz entziehen').setEmoji('🪑').setStyle(ButtonStyle.Secondary),
   ];
@@ -391,7 +421,8 @@ async function handleRangliste(interaction) {
   const lines  = teams.map((t, i) => {
     const levelName = GUILD.LEVELS[t.level]?.name ?? '?';
     const prefix    = medals[i] ?? `**${i + 1}.**`;
-    return `${prefix} **${t.name}** — Stufe ${t.level} (${levelName}) · ${formatCoins(t.treasury)}`;
+    const memberCount = t.members?.length ?? 0;
+    return `${prefix} **${t.name}** — Stufe ${t.level} (${levelName}) · ${formatCoins(t.treasury)} · 👥 ${memberCount}`;
   });
 
   const embed = createEmbed({
@@ -410,6 +441,26 @@ async function handleLeave(interaction) {
   if (team.leaderId === user.id) {
     return interaction.reply({ content: '❌ Als Anführer kannst du nicht verlassen — löse die Gilde auf oder gib sie ab.', ephemeral: true });
   }
+  const embed = createEmbed({
+    title: '🚶 Gilde verlassen',
+    color: COLORS.WARNING,
+    description: `Möchtest du **${team.name}** wirklich verlassen?`,
+  });
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('gilden_leave_yes').setLabel('Ja, verlassen').setEmoji('🚶').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('gilden_leave_no').setLabel('Abbrechen').setEmoji('❌').setStyle(ButtonStyle.Secondary),
+  );
+  return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+}
+
+async function handleLeaveExecute(interaction) {
+  const { guild, user } = interaction;
+  const team = await GuildTeam.findOne({ guildId: guild.id, members: user.id });
+  if (!team) return interaction.update({ content: '❌ Gilde nicht gefunden.', embeds: [], components: [] });
+  if (team.leaderId === user.id) {
+    return interaction.update({ content: '❌ Als Anführer kannst du nicht verlassen.', embeds: [], components: [] });
+  }
+  const teamName = team.name;
   team.members = team.members.filter(id => id !== user.id);
   await team.save();
   if (team.roleId) {
@@ -418,7 +469,7 @@ async function handleLeave(interaction) {
   } else {
     syncGuildChannelPerms(guild, team).catch(() => {});
   }
-  return interaction.reply({ content: `✅ Du hast die Gilde **${team.name}** verlassen.`, ephemeral: true });
+  return interaction.update({ content: `✅ Du hast die Gilde **${teamName}** verlassen.`, embeds: [], components: [] });
 }
 
 async function handleDisbandConfirm(interaction) {
@@ -468,11 +519,24 @@ function showCreateModal(interaction) {
   return interaction.showModal(modal);
 }
 
-function showDonateModal(interaction) {
+async function showDonateModal(interaction) {
+  const { guild, user } = interaction;
+  const team = await GuildTeam.findOne({ guildId: guild.id, members: user.id });
+  const currentContrib = team ? (team.memberContributions?.get(user.id) ?? team.weeklyContribution ?? 0) : 0;
+
   const modal = new ModalBuilder().setCustomId('modal_gilden_donate').setTitle('In Kasse einzahlen');
   modal.addComponents(
     new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('amount').setLabel('Betrag').setStyle(TextInputStyle.Short).setPlaceholder('z.B. 500').setRequired(true),
+      new TextInputBuilder().setCustomId('amount').setLabel('Einmalige Spende (optional)').setStyle(TextInputStyle.Short).setPlaceholder('z.B. 500').setRequired(false),
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('weekly')
+        .setLabel('Wochenbeitrag (leer = unverändert)')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('z.B. 200')
+        .setRequired(false)
+        .setValue(currentContrib > 0 ? String(currentContrib) : ''),
     ),
   );
   return interaction.showModal(modal);
@@ -573,24 +637,40 @@ async function handleCreate(interaction) {
 
 async function handleDonate(interaction) {
   const { guild, user } = interaction;
-  const amount = parseInt(interaction.fields.getTextInputValue('amount').replace(/\D/g, ''), 10);
-  if (!amount || amount <= 0) return interaction.reply({ content: '❌ Ungültiger Betrag.', ephemeral: true });
+  const amountRaw = interaction.fields.getTextInputValue('amount').replace(/\D/g, '');
+  const weeklyRaw = interaction.fields.getTextInputValue('weekly').replace(/\D/g, '');
+  const amount  = amountRaw ? parseInt(amountRaw, 10) : null;
+  const weekly  = weeklyRaw ? parseInt(weeklyRaw, 10) : null;
+
+  if (amount === null && weekly === null) return interaction.reply({ content: '❌ Bitte mindestens einen Betrag angeben.', ephemeral: true });
+  if (amount !== null && (isNaN(amount) || amount <= 0)) return interaction.reply({ content: '❌ Ungültige Einmalspende.', ephemeral: true });
+  if (weekly !== null && (isNaN(weekly) || weekly < 0)) return interaction.reply({ content: '❌ Ungültiger Wochenbeitrag.', ephemeral: true });
 
   const team = await GuildTeam.findOne({ guildId: guild.id, members: user.id });
   if (!team) return interaction.reply({ content: '❌ Du bist in keiner Gilde.', ephemeral: true });
 
-  try {
-    await coinService.removeCoins(guild.id, user.id, amount, 'guild', `Gildenspende: ${team.name}`);
-  } catch (err) {
-    return interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
+  const lines = [];
+
+  if (amount !== null) {
+    try {
+      await coinService.removeCoins(guild.id, user.id, amount, 'guild', `Gildenspende: ${team.name}`);
+    } catch (err) {
+      return interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
+    }
+    team.treasury += amount;
+    team.level = calcLevel(team.treasury);
+    lines.push(`✅ <@${user.id}> hat **${formatCoins(amount)}** in die Kasse eingezahlt!`);
   }
 
-  team.treasury += amount;
-  team.level = calcLevel(team.treasury);
-  await team.save();
+  if (weekly !== null) {
+    team.memberContributions.set(user.id, weekly);
+    lines.push(weekly > 0
+      ? `📅 Wochenbeitrag auf **${formatCoins(weekly)}** gesetzt.`
+      : '📅 Wochenbeitrag deaktiviert.');
+  }
 
   const payload = buildGildenEmbed(team);
-  return interaction.reply({ ...payload, content: `✅ <@${user.id}> hat **${formatCoins(amount)}** in die Kasse eingezahlt!`, ephemeral: true });
+  return interaction.reply({ ...payload, content: lines.join('\n'), ephemeral: true });
 }
 
 async function handleInvite(interaction) {
@@ -1376,6 +1456,628 @@ async function handleClaimLeadership(interaction) {
   return interaction.reply({ ...payload, content: `👑 Du hast die Führung von **${team.name}** übernommen!`, ephemeral: true });
 }
 
+// ─── Gilden-Tasks ─────────────────────────────────────────────────────────────
+
+const GuildTask = require('../models/GuildTask');
+
+async function handleTasksManage(interaction) {
+  const { guild, user } = interaction;
+  const team = await GuildTeam.findOne({ guildId: guild.id, leaderId: user.id });
+  if (!team) return interaction.reply({ content: '❌ Nur der Anführer kann Tasks verwalten.', ephemeral: true });
+
+  const tasks = await GuildTask.find({ teamId: team._id.toString(), status: { $in: ['open', 'claimed', 'submitted'] } }).lean();
+
+  const statusEmoji = { open: '📋', claimed: '⚒️', submitted: '📬' };
+  const statusLabel = { open: 'Offen', claimed: 'In Arbeit', submitted: 'Eingereicht' };
+
+  const desc = tasks.length
+    ? tasks.map(t =>
+        `${statusEmoji[t.status]} **${t.title}** — ${formatCoins(t.reward)} · ${statusLabel[t.status]}` +
+        (t.claimedBy ? ` · <@${t.claimedBy}>` : '')
+      ).join('\n')
+    : '*Keine aktiven Tasks. Erstelle einen neuen!*';
+
+  const embed = createEmbed({
+    title:       `📋 Tasks — ${team.name}`,
+    color:       COLORS.PRIMARY,
+    description: desc,
+    footer:      `Kasse: ${formatCoins(team.treasury)}`,
+  });
+
+  const createBtn = new ButtonBuilder()
+    .setCustomId('gilden_task_create')
+    .setLabel('Task erstellen')
+    .setEmoji('➕')
+    .setStyle(ButtonStyle.Success);
+
+  const components = [new ActionRowBuilder().addComponents(createBtn)];
+
+  if (tasks.length > 0) {
+    const deleteSelect = new StringSelectMenuBuilder()
+      .setCustomId('gilden_task_delete_select')
+      .setPlaceholder('Task löschen…')
+      .addOptions(tasks.slice(0, 25).map(t => ({
+        label:       t.title.slice(0, 100),
+        value:       t._id.toString(),
+        description: `${statusLabel[t.status]} · ${formatCoins(t.reward)}`,
+      })));
+    components.push(new ActionRowBuilder().addComponents(deleteSelect));
+  }
+
+  return interaction.reply({ embeds: [embed], components, ephemeral: true });
+}
+
+function showTaskCreateModal(interaction) {
+  const modal = new ModalBuilder().setCustomId('modal_gilden_task_create').setTitle('Task erstellen');
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('title')
+        .setLabel('Titel')
+        .setStyle(TextInputStyle.Short)
+        .setMaxLength(60)
+        .setRequired(true),
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('description')
+        .setLabel('Beschreibung (optional)')
+        .setStyle(TextInputStyle.Paragraph)
+        .setMaxLength(500)
+        .setRequired(false)
+        .setPlaceholder('Was muss erledigt werden?'),
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('reward')
+        .setLabel('Belohnung aus Kasse (Coins)')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('z.B. 500')
+        .setRequired(true),
+    ),
+  );
+  return interaction.showModal(modal);
+}
+
+async function handleTaskCreate(interaction) {
+  const { guild, user } = interaction;
+  const team = await GuildTeam.findOne({ guildId: guild.id, leaderId: user.id });
+  if (!team) return interaction.reply({ content: '❌ Nur der Anführer kann Tasks erstellen.', ephemeral: true });
+
+  const title  = interaction.fields.getTextInputValue('title').trim();
+  const desc   = interaction.fields.getTextInputValue('description').trim() || null;
+  const reward = parseInt(interaction.fields.getTextInputValue('reward').replace(/\D/g, ''), 10);
+
+  if (!reward || reward <= 0) {
+    return interaction.reply({ content: '❌ Ungültige Belohnung.', ephemeral: true });
+  }
+  if (reward > team.treasury) {
+    return interaction.reply({ content: `❌ Nicht genug in der Kasse! Verfügbar: **${formatCoins(team.treasury)}**`, ephemeral: true });
+  }
+
+  await GuildTask.create({ guildId: guild.id, teamId: team._id.toString(), title, description: desc, reward });
+
+  return interaction.reply({
+    content: `✅ Task **${title}** erstellt (${formatCoins(reward)})! Mitglieder können ihn im Gilden-Menü übernehmen.`,
+    ephemeral: true,
+  });
+}
+
+async function handleTasksView(interaction) {
+  const { guild, user } = interaction;
+  const team = await GuildTeam.findOne({ guildId: guild.id, members: user.id });
+  if (!team) return interaction.reply({ content: '❌ Du bist in keiner Gilde.', ephemeral: true });
+
+  const tasks = await GuildTask.find({ teamId: team._id.toString(), status: 'open' }).lean();
+  if (!tasks.length) {
+    return interaction.reply({ content: '❌ Keine offenen Tasks vorhanden.', ephemeral: true });
+  }
+
+  const desc = tasks.map(t =>
+    `📋 **${t.title}** — ${formatCoins(t.reward)}` + (t.description ? `\n*${t.description}*` : '')
+  ).join('\n\n');
+
+  const embed = createEmbed({
+    title:       `📋 Offene Tasks — ${team.name}`,
+    color:       COLORS.PRIMARY,
+    description: desc,
+  });
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId('gilden_task_claim_select')
+    .setPlaceholder('Task übernehmen…')
+    .addOptions(tasks.slice(0, 25).map(t => ({
+      label:       t.title.slice(0, 100),
+      value:       t._id.toString(),
+      description: `Belohnung: ${formatCoins(t.reward)}`,
+    })));
+
+  return interaction.reply({ embeds: [embed], components: [new ActionRowBuilder().addComponents(select)], ephemeral: true });
+}
+
+async function handleTaskClaimSelect(interaction) {
+  const { guild, user } = interaction;
+  const { ChannelType, PermissionFlagsBits, OverwriteType } = require('discord.js');
+  const taskId = interaction.values[0];
+
+  const task = await GuildTask.findById(taskId);
+  if (!task || task.status !== 'open') {
+    return interaction.update({ content: '❌ Dieser Task ist nicht mehr verfügbar.', embeds: [], components: [] });
+  }
+
+  const team = await GuildTeam.findOne({ guildId: guild.id, members: user.id, _id: task.teamId });
+  if (!team) {
+    return interaction.update({ content: '❌ Du bist nicht in dieser Gilde.', embeds: [], components: [] });
+  }
+
+  await interaction.deferUpdate();
+
+  const claimerMember = await guild.members.fetch(user.id).catch(() => null);
+  const leaderMember  = await guild.members.fetch(team.leaderId).catch(() => null);
+
+  const taskSlug   = task.title.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20);
+  const memberSlug = (claimerMember?.displayName ?? user.id).toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 15);
+
+  const overwrites = [
+    { id: guild.id, type: OverwriteType.Role, deny: [PermissionFlagsBits.ViewChannel] },
+    { id: user.id, type: OverwriteType.Member, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+  ];
+  if (leaderMember) {
+    overwrites.push({ id: leaderMember.id, type: OverwriteType.Member, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+  }
+
+  const channel = await guild.channels.create({
+    name:                 `task-${taskSlug}-${memberSlug}`,
+    type:                 ChannelType.GuildText,
+    permissionOverwrites: overwrites,
+  });
+
+  task.status    = 'claimed';
+  task.claimedBy = user.id;
+  task.channelId = channel.id;
+  await task.save();
+
+  const embed = createEmbed({
+    title:       `📋 ${task.title}`,
+    color:       COLORS.PRIMARY,
+    description: task.description ?? 'Keine Beschreibung.',
+    fields: [
+      { name: 'Bearbeiter',  value: `<@${user.id}>`,        inline: true },
+      { name: 'Belohnung',   value: formatCoins(task.reward), inline: true },
+      { name: 'Anführer',    value: `<@${team.leaderId}>`,   inline: true },
+    ],
+    footer: 'Klicke auf "Abgeschlossen" wenn du fertig bist.',
+  });
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`gilden_task_submit_${task._id}_${channel.id}`)
+      .setLabel('Abgeschlossen')
+      .setEmoji('✅')
+      .setStyle(ButtonStyle.Success),
+  );
+
+  await channel.send({ content: `<@${user.id}> <@${team.leaderId}>`, embeds: [embed], components: [row] });
+
+  return interaction.editReply({ content: `✅ Task übernommen! Ticket: <#${channel.id}>`, embeds: [], components: [] });
+}
+
+async function handleTaskSubmit(interaction) {
+  const parts     = interaction.customId.split('_');
+  const channelId = parts.at(-1);
+  const taskId    = parts.at(-2);
+  const { user } = interaction;
+
+  const task = await GuildTask.findById(taskId);
+  if (!task || task.status !== 'claimed') {
+    return interaction.reply({ content: '❌ Dieser Task ist nicht mehr aktiv.', ephemeral: true });
+  }
+  if (task.claimedBy !== user.id) {
+    return interaction.reply({ content: '❌ Nur der Bearbeiter kann den Task als abgeschlossen markieren.', ephemeral: true });
+  }
+
+  task.status = 'submitted';
+  await task.save();
+
+  const embed = createEmbed({
+    title:       '📬 Task eingereicht!',
+    color:       COLORS.WARNING,
+    description: `<@${user.id}> hat den Task **${task.title}** als abgeschlossen markiert.\n\nBitte überprüfe die Arbeit und bestätige oder lehne ab.`,
+    fields:      [{ name: 'Belohnung', value: formatCoins(task.reward), inline: true }],
+  });
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`gilden_task_approve_${task._id}_${channelId}`)
+      .setLabel('Annehmen')
+      .setEmoji('✅')
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(`gilden_task_reject_${task._id}_${channelId}`)
+      .setLabel('Ablehnen')
+      .setEmoji('❌')
+      .setStyle(ButtonStyle.Danger),
+  );
+
+  await interaction.update({ embeds: [embed], components: [row] });
+}
+
+async function handleTaskApprove(interaction) {
+  const parts     = interaction.customId.split('_');
+  const channelId = parts.at(-1);
+  const taskId    = parts.at(-2);
+  const { guild, user } = interaction;
+
+  const task = await GuildTask.findById(taskId);
+  if (!task || task.status !== 'submitted') {
+    return interaction.reply({ content: '❌ Dieser Task wurde bereits bearbeitet.', ephemeral: true });
+  }
+
+  const team = await GuildTeam.findById(task.teamId);
+  if (!team || team.leaderId !== user.id) {
+    return interaction.reply({ content: '❌ Nur der Anführer kann Tasks genehmigen.', ephemeral: true });
+  }
+  if (team.treasury < task.reward) {
+    return interaction.reply({ content: `❌ Nicht genug in der Kasse! Verfügbar: **${formatCoins(team.treasury)}**, benötigt: **${formatCoins(task.reward)}**`, ephemeral: true });
+  }
+
+  team.treasury -= task.reward;
+  await team.save();
+
+  await coinService.addCoins(guild.id, task.claimedBy, task.reward, 'guild', `Task abgeschlossen: ${task.title}`);
+
+  task.status = 'completed';
+  await task.save();
+
+  const embed = createEmbed({
+    title:       '✅ Task genehmigt!',
+    color:       COLORS.SUCCESS,
+    description: `<@${task.claimedBy}> erhält **${formatCoins(task.reward)}** aus der Gildenkasse.\n\nDieser Channel wird in 10 Sekunden gelöscht.`,
+  });
+  await interaction.update({ embeds: [embed], components: [] });
+
+  setTimeout(async () => {
+    const ch = await guild.channels.fetch(channelId).catch(() => null);
+    if (ch) await ch.delete().catch(() => {});
+  }, 10_000);
+}
+
+async function handleTaskReject(interaction) {
+  const parts     = interaction.customId.split('_');
+  const channelId = parts.at(-1);
+  const taskId    = parts.at(-2);
+  const { guild, user } = interaction;
+
+  const task = await GuildTask.findById(taskId);
+  if (!task || task.status !== 'submitted') {
+    return interaction.reply({ content: '❌ Dieser Task wurde bereits bearbeitet.', ephemeral: true });
+  }
+
+  const team = await GuildTeam.findById(task.teamId).lean();
+  if (!team || team.leaderId !== user.id) {
+    return interaction.reply({ content: '❌ Nur der Anführer kann Tasks ablehnen.', ephemeral: true });
+  }
+
+  const prevClaimedBy = task.claimedBy;
+  task.status    = 'open';
+  task.claimedBy = null;
+  task.channelId = null;
+  await task.save();
+
+  if (prevClaimedBy) {
+    sendDmNotification(
+      interaction.client,
+      guild.id,
+      prevClaimedBy,
+      `❌ Dein eingereichter Task **${task.title}** wurde abgelehnt. Er ist wieder offen.`,
+    );
+  }
+
+  const embed = createEmbed({
+    title:       '❌ Task abgelehnt',
+    color:       COLORS.ERROR,
+    description: `Der Task wurde abgelehnt und ist wieder verfügbar.\n\nDieser Channel wird in 10 Sekunden gelöscht.`,
+  });
+  await interaction.update({ embeds: [embed], components: [] });
+
+  setTimeout(async () => {
+    const ch = await guild.channels.fetch(channelId).catch(() => null);
+    if (ch) await ch.delete().catch(() => {});
+  }, 10_000);
+}
+
+async function handleTaskDeleteSelect(interaction) {
+  const { user, guild } = interaction;
+  const taskId = interaction.values[0];
+
+  const task = await GuildTask.findById(taskId);
+  if (!task) return interaction.update({ content: '❌ Task nicht gefunden.', components: [] });
+
+  const team = await GuildTeam.findOne({ guildId: guild.id, leaderId: user.id });
+  if (!team || task.teamId !== team._id.toString()) {
+    return interaction.update({ content: '❌ Keine Berechtigung.', components: [] });
+  }
+  if (task.status === 'claimed' || task.status === 'submitted') {
+    return interaction.update({ content: `❌ Task **${task.title}** ist bereits in Bearbeitung und kann nicht gelöscht werden.`, components: [] });
+  }
+
+  await GuildTask.deleteOne({ _id: taskId });
+  return interaction.update({ content: `🗑️ Task **${task.title}** wurde gelöscht.`, embeds: [], components: [] });
+}
+
+// ─── Gildenjobs ───────────────────────────────────────────────────────────────
+
+function calcTotalContrib(team) {
+  return team.members.reduce((sum, id) => {
+    const personal = team.memberContributions?.get(id);
+    return sum + (personal != null ? personal : (team.weeklyContribution ?? 0));
+  }, 0);
+}
+
+async function handleJobsManage(interaction) {
+  const { guild, user } = interaction;
+  const team = await GuildTeam.findOne({ guildId: guild.id, leaderId: user.id });
+  if (!team) return interaction.reply({ content: '❌ Nur der Anführer kann Jobs verwalten.', ephemeral: true });
+
+  const jobs        = team.guildJobs ?? [];
+  const filledJobs  = jobs.filter(j => j.status === 'filled');
+  const openJobs    = jobs.filter(j => j.status === 'open');
+  const totalSalary = jobs.reduce((s, j) => s + j.salary, 0);
+  const totalContrib = calcTotalContrib(team);
+
+  const filledLines = filledJobs.length
+    ? filledJobs.map(j => `• <@${j.userId}> — **${j.title}** · ${formatCoins(j.salary)}/Woche`).join('\n')
+    : '*Keine besetzten Stellen.*';
+
+  const openLines = openJobs.length
+    ? openJobs.map(j => `• **${j.title}** · ${formatCoins(j.salary)}/Woche · ${j.applicants.length} Bewerbung(en)`).join('\n')
+    : '*Keine offenen Stellen.*';
+
+  const balanceOk   = totalContrib >= totalSalary;
+  const balanceText = balanceOk
+    ? '✅ Beiträge decken alle ausgeschriebenen Gehälter.'
+    : `⚠️ Fehlbetrag: **${formatCoins(totalSalary - totalContrib)}** — Beitrag erhöhen oder Stellen streichen!`;
+
+  const embed = createEmbed({
+    title: `💼 ${team.name} — Gildenjobs`,
+    color: balanceOk ? COLORS.PRIMARY : COLORS.WARNING,
+    fields: [
+      { name: '✅ Besetzte Stellen', value: filledLines },
+      { name: '📢 Offene Stellen', value: openLines },
+      { name: '💸 Gesamtgehälter / Woche', value: formatCoins(totalSalary), inline: true },
+      { name: '📥 Wochenbeiträge gesamt', value: formatCoins(totalContrib), inline: true },
+      { name: 'Bilanz', value: balanceText },
+    ],
+  });
+
+  const hasApplicants = openJobs.some(j => j.applicants.length > 0);
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('gilden_job_beitrag').setLabel('Beitrag festlegen').setEmoji('💰').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('gilden_job_post').setLabel('Stelle ausschreiben').setEmoji('📢').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('gilden_job_applications').setLabel('Bewerbungen').setEmoji('📋').setStyle(ButtonStyle.Primary).setDisabled(!hasApplicants),
+    new ButtonBuilder().setCustomId('gilden_job_remove').setLabel('Stelle entfernen').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+  );
+
+  return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+}
+
+function showSetContributionModal(interaction) {
+  const modal = new ModalBuilder().setCustomId('modal_guild_job_beitrag').setTitle('Wochenbeitrag festlegen');
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('amount').setLabel('Betrag pro Mitglied pro Woche').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('z.B. 500'),
+    ),
+  );
+  return interaction.showModal(modal);
+}
+
+async function handleSetContribution(interaction) {
+  const { guild, user } = interaction;
+  const amount = parseInt(interaction.fields.getTextInputValue('amount'));
+  if (isNaN(amount) || amount < 0) return interaction.reply({ content: '❌ Ungültiger Betrag.', ephemeral: true });
+
+  const team = await GuildTeam.findOne({ guildId: guild.id, leaderId: user.id });
+  if (!team) return interaction.reply({ content: '❌ Nur der Anführer kann den Beitrag festlegen.', ephemeral: true });
+
+  team.weeklyContribution = amount;
+  await team.save();
+  return interaction.reply({ content: `✅ Wochenbeitrag auf **${formatCoins(amount)}** pro Mitglied gesetzt.`, ephemeral: true });
+}
+
+function showPostJobModal(interaction) {
+  const modal = new ModalBuilder().setCustomId('modal_guild_job_post').setTitle('Stelle ausschreiben');
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('title').setLabel('Jobtitel').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(50),
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('salary').setLabel('Wöchentliches Gehalt').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('z.B. 1000'),
+    ),
+  );
+  return interaction.showModal(modal);
+}
+
+async function handlePostJob(interaction) {
+  const { guild, user } = interaction;
+  const title  = interaction.fields.getTextInputValue('title').trim();
+  const salary = parseInt(interaction.fields.getTextInputValue('salary'));
+  if (isNaN(salary) || salary <= 0) return interaction.reply({ content: '❌ Ungültiges Gehalt.', ephemeral: true });
+
+  const team = await GuildTeam.findOne({ guildId: guild.id, leaderId: user.id });
+  if (!team) return interaction.reply({ content: '❌ Nur der Anführer kann Stellen ausschreiben.', ephemeral: true });
+
+  const totalSalary  = (team.guildJobs ?? []).reduce((s, j) => s + j.salary, 0) + salary;
+  const totalContrib = calcTotalContrib(team);
+  if (totalContrib < totalSalary) {
+    return interaction.reply({
+      content: `❌ Die Wochenbeiträge reichen nicht aus!\n💸 Neue Gesamtgehälter: **${formatCoins(totalSalary)}/Woche**\n📥 Wochenbeiträge gesamt: **${formatCoins(totalContrib)}/Woche**\n\nErhöhe den Wochenbeitrag oder senke das Gehalt.`,
+      ephemeral: true,
+    });
+  }
+
+  team.guildJobs.push({ title, salary, assignedBy: user.id, status: 'open', applicants: [] });
+  await team.save();
+  return interaction.reply({ content: `📢 Stelle **${title}** wurde ausgeschrieben — ${formatCoins(salary)}/Woche. Mitglieder können sich jetzt bewerben.`, ephemeral: true });
+}
+
+async function showApplicationsJobSelect(interaction) {
+  const { guild, user } = interaction;
+  const team = await GuildTeam.findOne({ guildId: guild.id, leaderId: user.id });
+  if (!team) return interaction.reply({ content: '❌ Nur der Anführer kann Bewerbungen prüfen.', ephemeral: true });
+
+  const jobsWithApplicants = (team.guildJobs ?? []).filter(j => j.status === 'open' && j.applicants.length > 0);
+  if (!jobsWithApplicants.length) return interaction.reply({ content: '❌ Keine offenen Bewerbungen vorhanden.', ephemeral: true });
+
+  const options = jobsWithApplicants.map(j => ({
+    label: j.title,
+    description: `${j.applicants.length} Bewerbung(en) — ${formatCoins(j.salary)}/Woche`,
+    value: j._id.toString(),
+  }));
+
+  const row = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder().setCustomId('gilden_job_applications_select').setPlaceholder('Stelle auswählen').addOptions(options),
+  );
+  return interaction.reply({ content: '📋 Für welche Stelle Bewerbungen prüfen?', components: [row], ephemeral: true });
+}
+
+async function handleApplicationsJobSelect(interaction) {
+  const { guild, user } = interaction;
+  const jobId = interaction.values[0];
+  const team  = await GuildTeam.findOne({ guildId: guild.id, leaderId: user.id });
+  if (!team) return interaction.update({ content: '❌ Nicht autorisiert.', components: [] });
+
+  const job = team.guildJobs.id(jobId);
+  if (!job || job.status !== 'open') return interaction.update({ content: '❌ Stelle nicht mehr offen.', components: [] });
+  if (!job.applicants.length) return interaction.update({ content: '❌ Keine Bewerbungen vorhanden.', components: [] });
+
+  const members = await Promise.all(job.applicants.map(id => guild.members.fetch(id).catch(() => null)));
+  const options = job.applicants.map((id, i) => ({
+    label: members[i]?.displayName ?? id,
+    value: id,
+  }));
+
+  const row = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`gilden_job_applicant_select_${jobId}`)
+      .setPlaceholder('Bewerber einstellen')
+      .addOptions(options),
+  );
+  return interaction.update({ content: `👤 Wen für **${job.title}** einstellen?`, components: [row] });
+}
+
+async function handleApplicationApplicantSelect(interaction) {
+  const { guild, user } = interaction;
+  const jobId = interaction.customId.replace('gilden_job_applicant_select_', '');
+  const userId = interaction.values[0];
+
+  const team = await GuildTeam.findOne({ guildId: guild.id, leaderId: user.id });
+  if (!team) return interaction.update({ content: '❌ Nicht autorisiert.', components: [] });
+
+  const job = team.guildJobs.id(jobId);
+  if (!job || job.status !== 'open') return interaction.update({ content: '❌ Stelle nicht mehr verfügbar.', components: [] });
+
+  job.userId     = userId;
+  job.status     = 'filled';
+  job.assignedAt = new Date();
+  job.applicants = [];
+  await team.save();
+
+  return interaction.update({ content: `✅ <@${userId}> wurde als **${job.title}** eingestellt — ${formatCoins(job.salary)}/Woche.`, components: [] });
+}
+
+async function handleJobsView(interaction) {
+  const { guild, user } = interaction;
+  const team = await GuildTeam.findOne({ guildId: guild.id, members: user.id });
+  if (!team) return interaction.reply({ content: '❌ Du bist in keiner Gilde.', ephemeral: true });
+
+  const openJobs = (team.guildJobs ?? []).filter(j => j.status === 'open');
+  if (!openJobs.length) return interaction.reply({ content: '📋 Derzeit gibt es keine offenen Stellen in deiner Gilde.', ephemeral: true });
+
+  const lines = openJobs.map(j => {
+    const applied = j.applicants.includes(user.id) ? ' *(beworben)*' : '';
+    return `• **${j.title}** — ${formatCoins(j.salary)}/Woche${applied}`;
+  });
+
+  const embed = createEmbed({
+    title: `💼 ${team.name} — Offene Stellen`,
+    color: COLORS.PRIMARY,
+    description: lines.join('\n'),
+  });
+
+  const eligible = openJobs.filter(j => !j.applicants.includes(user.id));
+  const components = [];
+  if (eligible.length) {
+    const options = eligible.map(j => ({
+      label: j.title,
+      description: `${formatCoins(j.salary)}/Woche`,
+      value: j._id.toString(),
+    }));
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder().setCustomId('gilden_job_apply_select').setPlaceholder('Für eine Stelle bewerben…').addOptions(options),
+      ),
+    );
+  }
+
+  return interaction.reply({ embeds: [embed], components, ephemeral: true });
+}
+
+async function handleJobApplySelect(interaction) {
+  const { guild, user } = interaction;
+  const jobId = interaction.values[0];
+
+  const team = await GuildTeam.findOne({ guildId: guild.id, members: user.id });
+  if (!team) return interaction.update({ content: '❌ Gilde nicht gefunden.', components: [] });
+
+  const job = team.guildJobs.id(jobId);
+  if (!job || job.status !== 'open') return interaction.update({ content: '❌ Diese Stelle ist nicht mehr verfügbar.', components: [] });
+  if (job.applicants.includes(user.id)) return interaction.update({ content: '❌ Du hast dich bereits beworben.', components: [] });
+
+  job.applicants.push(user.id);
+  await team.save();
+  return interaction.update({ content: `✅ Bewerbung für **${job.title}** eingereicht! Der Anführer prüft sie.`, components: [] });
+}
+
+async function showRemoveJobSelect(interaction) {
+  const { guild, user } = interaction;
+  const team = await GuildTeam.findOne({ guildId: guild.id, leaderId: user.id });
+  if (!team) return interaction.reply({ content: '❌ Nur der Anführer kann Stellen entfernen.', ephemeral: true });
+
+  const jobs = team.guildJobs ?? [];
+  if (!jobs.length) return interaction.reply({ content: '❌ Keine Stellen vorhanden.', ephemeral: true });
+
+  const options = await Promise.all(jobs.map(async j => {
+    const label = j.status === 'filled'
+      ? (await guild.members.fetch(j.userId).catch(() => null))?.displayName ?? j.userId
+      : `[Offen] ${j.title}`;
+    return {
+      label: j.status === 'filled' ? label : `📢 ${j.title}`,
+      description: `${j.title} — ${formatCoins(j.salary)}/Woche`,
+      value: j._id.toString(),
+    };
+  }));
+
+  const row = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder().setCustomId('gilden_job_remove_select').setPlaceholder('Stelle auswählen').addOptions(options),
+  );
+  return interaction.reply({ content: '🗑️ Welche Stelle entfernen?', components: [row], ephemeral: true });
+}
+
+async function handleRemoveJobSelect(interaction) {
+  const { guild, user } = interaction;
+  const jobId = interaction.values[0];
+  const team  = await GuildTeam.findOne({ guildId: guild.id, leaderId: user.id });
+  if (!team) return interaction.update({ content: '❌ Nicht autorisiert.', components: [] });
+
+  const job = team.guildJobs.id(jobId);
+  if (!job) return interaction.update({ content: '❌ Stelle nicht gefunden.', components: [] });
+
+  const label = job.title;
+  team.guildJobs.pull({ _id: jobId });
+  await team.save();
+  return interaction.update({ content: `✅ Stelle **${label}** wurde entfernt.`, components: [] });
+}
+
 module.exports = {
   getGildenPayload,
   handleGildenButton,
@@ -1389,6 +2091,7 @@ module.exports = {
   showKickSelect,
   handleKickSelect,
   handleLeave,
+  handleLeaveExecute,
   handleDisbandConfirm,
   handleDisbandExecute,
   showCreateModal,
@@ -1415,4 +2118,25 @@ module.exports = {
   handlePersonalErnennenSelect,
   handlePersonalEntlassen,
   handlePersonalEntlassenSelect,
+  handleTasksManage,
+  showTaskCreateModal,
+  handleTaskCreate,
+  handleTasksView,
+  handleTaskClaimSelect,
+  handleTaskSubmit,
+  handleTaskApprove,
+  handleTaskReject,
+  handleTaskDeleteSelect,
+  handleJobsManage,
+  showSetContributionModal,
+  handleSetContribution,
+  showPostJobModal,
+  handlePostJob,
+  showApplicationsJobSelect,
+  handleApplicationsJobSelect,
+  handleApplicationApplicantSelect,
+  handleJobsView,
+  handleJobApplySelect,
+  showRemoveJobSelect,
+  handleRemoveJobSelect,
 };
