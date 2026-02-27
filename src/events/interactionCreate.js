@@ -1871,13 +1871,9 @@ async function handleButton(interaction) {
     const gs = require('../services/guildService');
     return gs.showNewsAddModal(interaction);
   }
-  if (id === 'gilden_sitze_vergeben') {
+  if (id === 'gilden_sitze') {
     const ss = require('../services/seatService');
-    return ss.handleSeatAssign(interaction);
-  }
-  if (id === 'gilden_sitze_entziehen') {
-    const ss = require('../services/seatService');
-    return ss.handleSeatRevoke(interaction);
+    return ss.handleSeatManage(interaction);
   }
   if (id === 'gilden_join') {
     const gs = require('../services/guildService');

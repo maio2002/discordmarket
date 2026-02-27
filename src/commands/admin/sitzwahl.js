@@ -195,6 +195,14 @@ module.exports = {
       const created = [];
       for (let i = 0; i < testData.length; i++) {
         const fakeLeader = `test_guild_leader_${i}_${Date.now()}`;
+
+        // Rolle vorab erstellen, damit Kanäle sofort sichtbar sind
+        let roleId = null;
+        try {
+          const role = await guild.roles.create({ name: testData[i].name, mentionable: false, reason: `Test-Gilden-Rolle: ${testData[i].name}` });
+          roleId = role.id;
+        } catch { /* ignorieren */ }
+
         const team = await GuildTeam.create({
           guildId:     guild.id,
           name:        testData[i].name,
@@ -202,13 +210,14 @@ module.exports = {
           leaderId:    fakeLeader,
           members:     [],
           leaderless:  true,
+          roleId,
         });
 
         try {
           const channelIds = await createGuildChannels(guild, team);
           team.channels = channelIds;
           await team.save();
-        } catch (err) {
+        } catch {
           // Kanäle konnten nicht erstellt werden (z.B. kein Marker konfiguriert) — ignorieren
         }
 

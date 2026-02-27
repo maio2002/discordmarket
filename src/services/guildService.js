@@ -145,36 +145,31 @@ function buildGildenEmbed(team, viewerId = null) {
   });
 
   // Basis-Buttons Reihe 1: für alle Mitglieder
+  const isLeader = viewerId && team.leaderId === viewerId;
+
   const row1 = [
     new ButtonBuilder().setCustomId('gilden_donate').setLabel('Spenden').setEmoji('💰').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId('gilden_news').setLabel('News').setEmoji('📰').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('gilden_aufgaben_view').setLabel('Aufgaben').setEmoji('📋').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('gilden_leave').setLabel('Verlassen').setEmoji('🚶').setStyle(ButtonStyle.Danger),
   ];
 
-  const isLeader = viewerId && team.leaderId === viewerId;
-  const row2 = [];
+  if (isLeader) {
+    row1.push(new ButtonBuilder().setCustomId('gilden_manage').setLabel('Verwalten').setEmoji('🔧').setStyle(ButtonStyle.Primary));
+  } else {
+    row1.push(new ButtonBuilder().setCustomId('gilden_leave').setLabel('Verlassen').setEmoji('🚶').setStyle(ButtonStyle.Danger));
+  }
+
+  const components = [new ActionRowBuilder().addComponents(row1)];
 
   if (team.leaderless) {
-    row2.push(
+    components.push(new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId('gilden_claim_leader')
         .setLabel(`Führung übernehmen (${formatCoins(GUILD.CLAIM_COST)})`)
         .setEmoji('👑')
         .setStyle(ButtonStyle.Primary),
-    );
-  } else if (isLeader) {
-    row2.push(
-      new ButtonBuilder()
-        .setCustomId('gilden_manage')
-        .setLabel('Verwalten')
-        .setEmoji('🔧')
-        .setStyle(ButtonStyle.Primary),
-    );
+    ));
   }
-
-  const components = [new ActionRowBuilder().addComponents(row1)];
-  if (row2.length > 0) components.push(new ActionRowBuilder().addComponents(row2));
 
   return { embeds: [embed], components };
 }
@@ -204,8 +199,7 @@ function buildManagePayload(team) {
   );
 
   const row2Buttons = [
-    new ButtonBuilder().setCustomId('gilden_sitze_vergeben').setLabel('Sitze vergeben').setEmoji('🏛️').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('gilden_sitze_entziehen').setLabel('Sitz entziehen').setEmoji('🪑').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('gilden_sitze').setLabel('Sitze').setEmoji('🏛️').setStyle(ButtonStyle.Secondary),
   ];
   if (team.level >= 1) {
     row2Buttons.push(
@@ -289,12 +283,18 @@ async function getGildenPayload(guildId, userId) {
 
 // ─── Kanal-Verwaltung ────────────────────────────────────────────────────────
 
+const GUILD_CHANNEL_ALLOW = [
+  PermissionFlagsBits.ViewChannel,
+  PermissionFlagsBits.SendMessages,
+  PermissionFlagsBits.ReadMessageHistory,
+];
+
 function buildGuildOverwrites(discordGuild, team) {
   const base = [{ id: discordGuild.id, type: OverwriteType.Role, deny: [PermissionFlagsBits.ViewChannel] }];
   if (team.roleId) {
-    return [...base, { id: team.roleId, type: OverwriteType.Role, allow: [PermissionFlagsBits.ViewChannel] }];
+    return [...base, { id: team.roleId, type: OverwriteType.Role, allow: GUILD_CHANNEL_ALLOW }];
   }
-  return [...base, ...team.members.map(id => ({ id, type: OverwriteType.Member, allow: [PermissionFlagsBits.ViewChannel] }))];
+  return [...base, ...team.members.map(id => ({ id, type: OverwriteType.Member, allow: GUILD_CHANNEL_ALLOW }))];
 }
 
 async function resolveMarker(discordGuild, channelId) {
@@ -894,6 +894,9 @@ async function handleJoinClaimConfirm(interaction) {
     } catch (err) {
       logger.warn(`Gilden-Kanäle für "${team.name}" konnten nicht erstellt werden: ${err.message}`);
     }
+  } else {
+    // Kanäle existieren bereits (z.B. Test-Gilde) — Berechtigungen mit neuer Rolle synchen
+    syncGuildChannelPerms(guild, team).catch(() => {});
   }
 
   await team.save();
@@ -1440,6 +1443,9 @@ async function handleClaimLeadership(interaction) {
     } catch (err) {
       logger.warn(`Gilden-Kanäle für "${team.name}" konnten nicht erstellt werden: ${err.message}`);
     }
+  } else {
+    // Kanäle existieren bereits — Berechtigungen mit neuer Rolle synchen
+    syncGuildChannelPerms(guild, team).catch(() => {});
   }
 
   await team.save();

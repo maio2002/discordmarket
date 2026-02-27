@@ -250,51 +250,67 @@ async function handleSeatVoteSelect(interaction) {
   return interaction.update({ content: `✅ Du hast für **${team.name}** gestimmt!${weightInfo}`, components: [] });
 }
 
-// ─── Sitze vergeben / entziehen ───────────────────────────────────────────────
+// ─── Sitze verwalten (kombiniert) ─────────────────────────────────────────────
 
-async function handleSeatAssign(interaction) {
-  const { guild, user } = interaction;
-
-  const team = await GuildTeam.findOne({ guildId: guild.id, leaderId: user.id });
-  if (!team) {
-    return interaction.reply({ content: '❌ Nur Fraktionsführer können Sitze vergeben.', ephemeral: true });
-  }
-  if (team.seats === 0) {
-    return interaction.reply({ content: '❌ Deine Fraktion hat keine Sitze (Ergebnis der letzten Sitzwahl).', ephemeral: true });
-  }
-  if (team.assignedSeats.length >= team.seats) {
-    return interaction.reply({ content: `❌ Alle ${team.seats} Sitz(e) sind bereits vergeben.`, ephemeral: true });
-  }
-
-  const eligible = team.members.filter(id => !team.assignedSeats.includes(id));
-  if (!eligible.length) {
-    return interaction.reply({ content: '❌ Alle Mitglieder haben bereits einen Sitz.', ephemeral: true });
-  }
-
-  const options = [];
-  for (const memberId of eligible) {
-    const member = await guild.members.fetch(memberId).catch(() => null);
-    if (!member) continue;
-    options.push({
-      label:       member.displayName.slice(0, 100),
-      value:       memberId,
-      description: member.user.username.slice(0, 100),
-    });
-  }
-  if (!options.length) {
-    return interaction.reply({ content: '❌ Keine Mitglieder gefunden.', ephemeral: true });
-  }
-
-  const select = new StringSelectMenuBuilder()
-    .setCustomId(`seat_assign_select_${team._id}`)
-    .setPlaceholder('Mitglied auswählen…')
-    .addOptions(options.slice(0, 25));
-
-  return interaction.reply({
-    content:    `🏛️ Wem möchtest du einen Sitz geben? (${team.assignedSeats.length}/${team.seats} vergeben)`,
-    components: [new ActionRowBuilder().addComponents(select)],
-    ephemeral:  true,
+async function buildSeatManagePayload(guild, team) {
+  const embed = createEmbed({
+    title:       `🏛️ Sitzverwaltung — ${team.name}`,
+    color:       COLORS.PRIMARY,
+    description: `**${team.assignedSeats.length}/${team.seats}** Sitz(e) vergeben.`,
+    fields:      team.assignedSeats.length
+      ? [{ name: 'Aktuelle Sitzinhaber', value: team.assignedSeats.map(id => `• <@${id}>`).join('\n') }]
+      : [],
   });
+
+  const components = [];
+
+  // Vergeben-Select: Mitglieder ohne Sitz, wenn noch Plätze frei
+  if (team.assignedSeats.length < team.seats) {
+    const eligible = team.members.filter(id => !team.assignedSeats.includes(id));
+    const opts = [];
+    for (const id of eligible) {
+      const m = await guild.members.fetch(id).catch(() => null);
+      if (m) opts.push({ label: m.displayName.slice(0, 100), value: id, description: m.user.username.slice(0, 100) });
+    }
+    if (opts.length) {
+      components.push(new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`seat_assign_select_${team._id}`)
+          .setPlaceholder('Sitz vergeben an…')
+          .addOptions(opts.slice(0, 25)),
+      ));
+    }
+  }
+
+  // Entziehen-Select: Mitglieder mit Sitz
+  if (team.assignedSeats.length) {
+    const opts = [];
+    for (const id of team.assignedSeats) {
+      const m = await guild.members.fetch(id).catch(() => null);
+      opts.push({ label: m ? m.displayName.slice(0, 100) : id, value: id });
+    }
+    components.push(new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`seat_revoke_select_${team._id}`)
+        .setPlaceholder('Sitz entziehen von…')
+        .addOptions(opts.slice(0, 25)),
+    ));
+  }
+
+  return { embeds: [embed], components };
+}
+
+async function handleSeatManage(interaction) {
+  const { guild, user } = interaction;
+  const team = await GuildTeam.findOne({ guildId: guild.id, leaderId: user.id });
+  if (!team) return interaction.reply({ content: '❌ Nur Fraktionsführer können Sitze verwalten.', ephemeral: true });
+  if (team.seats === 0) return interaction.reply({ content: '❌ Deine Fraktion hat keine Sitze (Ergebnis der letzten Sitzwahl).', ephemeral: true });
+
+  const payload = await buildSeatManagePayload(guild, team);
+  if (!payload.components.length) {
+    return interaction.reply({ content: `ℹ️ Alle ${team.seats} Sitz(e) sind vergeben und alle Mitglieder haben bereits einen Sitz.`, ephemeral: true });
+  }
+  return interaction.reply({ ...payload, ephemeral: true });
 }
 
 async function handleSeatAssignSelect(interaction) {
@@ -303,18 +319,10 @@ async function handleSeatAssignSelect(interaction) {
   const targetId = interaction.values[0];
 
   const team = await GuildTeam.findById(teamId);
-  if (!team || team.leaderId !== user.id) {
-    return interaction.update({ content: '❌ Keine Berechtigung.', components: [] });
-  }
-  if (!team.members.includes(targetId)) {
-    return interaction.update({ content: '❌ Mitglied nicht mehr in der Fraktion.', components: [] });
-  }
-  if (team.assignedSeats.includes(targetId)) {
-    return interaction.update({ content: '❌ Dieses Mitglied hat bereits einen Sitz.', components: [] });
-  }
-  if (team.assignedSeats.length >= team.seats) {
-    return interaction.update({ content: `❌ Alle ${team.seats} Sitz(e) sind bereits vergeben.`, components: [] });
-  }
+  if (!team || team.leaderId !== user.id) return interaction.update({ content: '❌ Keine Berechtigung.', embeds: [], components: [] });
+  if (!team.members.includes(targetId)) return interaction.update({ content: '❌ Mitglied nicht mehr in der Fraktion.', embeds: [], components: [] });
+  if (team.assignedSeats.includes(targetId)) return interaction.update({ content: '❌ Dieses Mitglied hat bereits einen Sitz.', embeds: [], components: [] });
+  if (team.assignedSeats.length >= team.seats) return interaction.update({ content: `❌ Alle ${team.seats} Sitz(e) sind bereits vergeben.`, embeds: [], components: [] });
 
   team.assignedSeats.push(targetId);
   await team.save();
@@ -322,7 +330,6 @@ async function handleSeatAssignSelect(interaction) {
   const config = await GuildConfig.findOne({ guildId: guild.id });
   const member  = await guild.members.fetch(targetId).catch(() => null);
 
-  // Sitz-Rolle automatisch erstellen falls nicht konfiguriert
   if (config && !config.sitzRoleId) {
     try {
       const role = await guild.roles.create({ name: 'Ratsabgeordneter', mentionable: false, reason: 'Sitz-Rolle automatisch erstellt' });
@@ -333,46 +340,10 @@ async function handleSeatAssignSelect(interaction) {
       logger.warn(`Sitz-Rolle konnte nicht erstellt werden: ${err.message}`);
     }
   }
-
   if (config?.sitzRoleId && member) await member.roles.add(config.sitzRoleId).catch(() => {});
 
-  return interaction.update({
-    content:    `✅ <@${targetId}> hat einen Sitz erhalten. (${team.assignedSeats.length}/${team.seats})`,
-    components: [],
-  });
-}
-
-async function handleSeatRevoke(interaction) {
-  const { guild, user } = interaction;
-
-  const team = await GuildTeam.findOne({ guildId: guild.id, leaderId: user.id });
-  if (!team) {
-    return interaction.reply({ content: '❌ Nur Fraktionsführer können Sitze entziehen.', ephemeral: true });
-  }
-  if (!team.assignedSeats.length) {
-    return interaction.reply({ content: '❌ Keine vergebenen Sitze vorhanden.', ephemeral: true });
-  }
-
-  const options = [];
-  for (const memberId of team.assignedSeats) {
-    const member = await guild.members.fetch(memberId).catch(() => null);
-    options.push({
-      label:       member ? member.displayName.slice(0, 100) : memberId,
-      value:       memberId,
-      description: member ? member.user.username.slice(0, 100) : 'Mitglied nicht gefunden',
-    });
-  }
-
-  const select = new StringSelectMenuBuilder()
-    .setCustomId(`seat_revoke_select_${team._id}`)
-    .setPlaceholder('Mitglied auswählen…')
-    .addOptions(options.slice(0, 25));
-
-  return interaction.reply({
-    content:    `🏛️ Wem möchtest du den Sitz entziehen? (${team.assignedSeats.length}/${team.seats} vergeben)`,
-    components: [new ActionRowBuilder().addComponents(select)],
-    ephemeral:  true,
-  });
+  const payload = await buildSeatManagePayload(guild, team);
+  return interaction.update({ ...payload, content: `✅ <@${targetId}> hat einen Sitz erhalten.` });
 }
 
 async function handleSeatRevokeSelect(interaction) {
@@ -381,12 +352,8 @@ async function handleSeatRevokeSelect(interaction) {
   const targetId = interaction.values[0];
 
   const team = await GuildTeam.findById(teamId);
-  if (!team || team.leaderId !== user.id) {
-    return interaction.update({ content: '❌ Keine Berechtigung.', components: [] });
-  }
-  if (!team.assignedSeats.includes(targetId)) {
-    return interaction.update({ content: '❌ Dieses Mitglied hat keinen Sitz in deiner Fraktion.', components: [] });
-  }
+  if (!team || team.leaderId !== user.id) return interaction.update({ content: '❌ Keine Berechtigung.', embeds: [], components: [] });
+  if (!team.assignedSeats.includes(targetId)) return interaction.update({ content: '❌ Dieses Mitglied hat keinen Sitz in deiner Fraktion.', embeds: [], components: [] });
 
   team.assignedSeats = team.assignedSeats.filter(id => id !== targetId);
   await team.save();
@@ -395,10 +362,8 @@ async function handleSeatRevokeSelect(interaction) {
   const member  = await guild.members.fetch(targetId).catch(() => null);
   if (config?.sitzRoleId && member) await member.roles.remove(config.sitzRoleId).catch(() => {});
 
-  return interaction.update({
-    content:    `✅ <@${targetId}> wurde der Sitz entzogen. (${team.assignedSeats.length}/${team.seats})`,
-    components: [],
-  });
+  const payload = await buildSeatManagePayload(guild, team);
+  return interaction.update({ ...payload, content: `✅ <@${targetId}> wurde der Sitz entzogen.` });
 }
 
 // ─── Sitzverteilung anzeigen ──────────────────────────────────────────────────
@@ -459,9 +424,8 @@ module.exports = {
   closeSeatElections,
   handleSeatVoteButton,
   handleSeatVoteSelect,
-  handleSeatAssign,
+  handleSeatManage,
   handleSeatAssignSelect,
-  handleSeatRevoke,
   handleSeatRevokeSelect,
   handleSeatList,
 };
