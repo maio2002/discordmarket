@@ -21,6 +21,7 @@ const guildConfigSchema = new mongoose.Schema({
   gildenVoiceMarkerChannelId: { type: String, default: null },
   seatElectionChannelId:      { type: String, default: null },
   sitzRoleId:                 { type: String, default: null },
+  arenaStageChannelId:        { type: String, default: null },
 });
 
 module.exports = mongoose.model('GuildConfig', guildConfigSchema);

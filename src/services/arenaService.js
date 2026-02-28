@@ -10,6 +10,8 @@ const {
   ChannelType,
   PermissionFlagsBits,
   OverwriteType,
+  GuildScheduledEventPrivacyLevel,
+  GuildScheduledEventEntityType,
 } = require('discord.js');
 
 const Arena    = require('../models/Arena');
@@ -38,6 +40,45 @@ async function isEligibleCreator(guildId, userId, member) {
   if (member.permissions.has(PermissionFlagsBits.ManageGuild)) return true;
   const team = await GuildTeam.findOne({ guildId, leaderId: userId });
   return !!team;
+}
+
+// Parst "TT.MM HH:MM" → Date (aktuelles Jahr)
+function parseDateTime(str) {
+  const match = str.trim().match(/^(\d{1,2})\.(\d{1,2})\s+(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  const [, day, month, hour, minute] = match.map(Number);
+  const date = new Date(new Date().getFullYear(), month - 1, day, hour, minute, 0, 0);
+  return isNaN(date.getTime()) ? null : date;
+}
+
+async function createArenaScheduledEvent(guild, arena) {
+  try {
+    const GuildConfig = require('../models/GuildConfig');
+    const config      = await GuildConfig.findOne({ guildId: guild.id });
+    const stageId     = config?.arenaStageChannelId ?? null;
+
+    const eventOptions = {
+      name:               `⚔️ ${arena.topic}`.slice(0, 100),
+      scheduledStartTime: arena.activeAt,
+      scheduledEndTime:   arena.endsAt,
+      privacyLevel:       GuildScheduledEventPrivacyLevel.GuildOnly,
+      description:        (arena.description ?? '').slice(0, 1000) || undefined,
+    };
+
+    if (stageId) {
+      eventOptions.entityType = GuildScheduledEventEntityType.StageInstance;
+      eventOptions.channel    = stageId;
+    } else {
+      eventOptions.entityType     = GuildScheduledEventEntityType.External;
+      eventOptions.entityMetadata = { location: 'Arena' };
+    }
+
+    const event   = await guild.scheduledEvents.create(eventOptions);
+    arena.eventId = event.id;
+    await arena.save();
+  } catch (err) {
+    logger.warn(`Arena-Event konnte nicht erstellt werden: ${err.message}`);
+  }
 }
 
 // ─── Hauptmenü ───────────────────────────────────────────────────────────────
@@ -121,6 +162,9 @@ async function buildArenaDetailPayload(guildId, page, userId) {
     new ButtonBuilder()
       .setCustomId(p < total - 1 ? `arena_page_${guildId}_${p + 1}` : 'arena_noop2')
       .setLabel('▶').setStyle(ButtonStyle.Secondary).setDisabled(p === total - 1),
+    new ButtonBuilder()
+      .setCustomId('arena_back_overview')
+      .setLabel('Zurück').setEmoji('🔙').setStyle(ButtonStyle.Secondary),
   );
 
   const components = [navRow];
@@ -154,6 +198,11 @@ async function handleArenaPage(interaction) {
   const page        = parseInt(interaction.customId.split('_').at(-1), 10);
   const guildId     = interaction.customId.slice('arena_page_'.length, interaction.customId.lastIndexOf('_'));
   const payload     = await buildArenaDetailPayload(guildId, page, interaction.user.id);
+  return interaction.update(payload);
+}
+
+async function handleArenaBackOverview(interaction) {
+  const payload = await getArenaOverviewPayload(interaction.guild.id, interaction.user.id, interaction.member);
   return interaction.update(payload);
 }
 
@@ -211,19 +260,23 @@ async function handleArenaTypeSelect(interaction) {
   await showArenaDauerModal(interaction, type);
 }
 
-async function showArenaDauerModal(interaction, type) {
+async function showArenaDauerModal(interaction) {
+  const now  = new Date();
+  const pad  = n => String(n).padStart(2, '0');
+  const hint = `${pad(now.getDate())}.${pad(now.getMonth() + 1)} HH:MM`;
+
   const modal = new ModalBuilder()
     .setCustomId('modal_arena_dauer')
-    .setTitle('Phasen-Dauer festlegen');
+    .setTitle('Phasen-Zeiten festlegen');
   modal.addComponents(
     new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('open_min').setLabel('Anmeldephase (Minuten, 5–1440)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('60'),
+      new TextInputBuilder().setCustomId('active_at').setLabel('Debatte beginnt (TT.MM HH:MM)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder(hint),
     ),
     new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('debate_min').setLabel('Debatte (Minuten, 5–1440)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('60'),
+      new TextInputBuilder().setCustomId('vote_at').setLabel('Abstimmung beginnt (TT.MM HH:MM)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder(hint),
     ),
     new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('vote_min').setLabel('Abstimmung (Minuten, 5–1440)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('30'),
+      new TextInputBuilder().setCustomId('ends_at').setLabel('Ende (TT.MM HH:MM)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder(hint),
     ),
   );
   return interaction.showModal(modal);
@@ -237,22 +290,17 @@ async function handleArenaDauerModal(interaction) {
   const { topic, description, type } = meta;
   pendingArena.delete(cacheKey);
 
-  const parse = (key) => {
-    const v = parseInt(interaction.fields.getTextInputValue(key), 10);
-    return isNaN(v) ? null : Math.max(ARENA.MIN_OPEN_MINUTES, Math.min(ARENA.MAX_OPEN_MINUTES, v));
-  };
-  const openMin   = parse('open_min');
-  const debateMin = parse('debate_min');
-  const voteMin   = parse('vote_min');
+  const activeAt = parseDateTime(interaction.fields.getTextInputValue('active_at'));
+  const voteAt   = parseDateTime(interaction.fields.getTextInputValue('vote_at'));
+  const endsAt   = parseDateTime(interaction.fields.getTextInputValue('ends_at'));
 
-  if (!openMin || !debateMin || !voteMin) {
-    return interaction.reply({ content: '❌ Bitte gültige Zahlen eingeben (5–1440 Minuten).', ephemeral: true });
+  if (!activeAt || !voteAt || !endsAt) {
+    return interaction.reply({ content: '❌ Ungültiges Format. Bitte `TT.MM HH:MM` verwenden (z.B. `28.02 14:00`).', ephemeral: true });
   }
-
-  const now      = new Date();
-  const activeAt = new Date(now.getTime() + openMin   * 60_000);
-  const voteAt   = new Date(activeAt.getTime() + debateMin * 60_000);
-  const endsAt   = new Date(voteAt.getTime()   + voteMin  * 60_000);
+  const now = new Date();
+  if (activeAt <= now) return interaction.reply({ content: '❌ Debatte-Beginn muss in der Zukunft liegen.', ephemeral: true });
+  if (voteAt <= activeAt) return interaction.reply({ content: '❌ Abstimmung muss nach Debatte-Beginn liegen.', ephemeral: true });
+  if (endsAt <= voteAt)   return interaction.reply({ content: '❌ Ende muss nach Abstimmungs-Beginn liegen.', ephemeral: true });
 
   const arena = await Arena.create({
     guildId:     interaction.guild.id,
@@ -265,10 +313,13 @@ async function handleArenaDauerModal(interaction) {
     endsAt,
   });
 
+  // Discord Server-Event erstellen
+  await createArenaScheduledEvent(interaction.guild, arena);
+
   const embed = createEmbed({
     title:       '✅ Arena erstellt!',
     color:       COLORS.SUCCESS,
-    description: `**${topic}**`,
+    description: `**${topic}**${arena.eventId ? '\n🗓️ Server-Event wurde automatisch erstellt.' : ''}`,
     fields: [
       { name: '📋 Typ',        value: type === 'einzeln' ? 'Einzeldebatte' : 'Gildenkampf', inline: true },
       { name: '📅 Debatte ab', value: formatTimestamp(activeAt),                            inline: true },
@@ -506,6 +557,67 @@ async function handleArenaAbstimmungSelect(interaction) {
   return interaction.update({ content: `✅ Deine Stimme wurde gezählt.`, embeds: [], components: [] });
 }
 
+// ─── Abstimmungsnachricht im Stage-Kanal ─────────────────────────────────────
+
+async function sendArenaVoteMessage(arena, client) {
+  const GuildConfig = require('../models/GuildConfig');
+  const discordGuild = client.guilds.cache.get(arena.guildId);
+  if (!discordGuild) return;
+
+  const config = await GuildConfig.findOne({ guildId: arena.guildId });
+  if (!config?.arenaStageChannelId) return;
+
+  const stageChannel = await discordGuild.channels.fetch(config.arenaStageChannelId).catch(() => null);
+  if (!stageChannel) return;
+
+  let options;
+  if (arena.type === 'einzeln') {
+    options = await Promise.all(arena.debaters.map(async d => {
+      const member = await discordGuild.members.fetch(d.userId).catch(() => null);
+      const name = member?.displayName ?? d.userId;
+      return new StringSelectMenuOptionBuilder().setLabel(name).setValue(d.userId);
+    }));
+  } else {
+    options = arena.guilds.map(g =>
+      new StringSelectMenuOptionBuilder().setLabel(g.name).setValue(g.teamId).setDescription(`Einsatz: ${formatCoins(g.wager)}`)
+    );
+  }
+
+  if (!options.length) return;
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`arena_vote_public_select_${arena._id}`)
+    .setPlaceholder('Kandidaten wählen')
+    .addOptions(options);
+
+  await stageChannel.send({
+    embeds: [createEmbed({
+      title:       '🗳️ Abstimmung läuft!',
+      color:       COLORS.XP,
+      description: `**${arena.topic}**\n\nWähle deinen Favoriten! Dein Stimmgewicht = Level + 1.\nAbstimmung endet ${formatTimestamp(arena.endsAt)}.`,
+    })],
+    components: [new ActionRowBuilder().addComponents(select)],
+  }).catch(() => null);
+}
+
+async function handleArenaVotePublicSelect(interaction) {
+  const arenaId  = interaction.customId.replace('arena_vote_public_select_', '');
+  const targetId = interaction.values[0];
+  const arena    = await Arena.findById(arenaId);
+
+  if (!arena || arena.status !== 'abstimmung') return interaction.reply({ content: '❌ Abstimmung nicht mehr aktiv.', ephemeral: true });
+
+  const valid = arena.type === 'einzeln'
+    ? arena.debaters.some(d => d.userId === targetId)
+    : arena.guilds.some(g => g.teamId === targetId);
+  if (!valid) return interaction.reply({ content: '❌ Ungültige Auswahl.', ephemeral: true });
+
+  arena.votes.set(interaction.user.id, targetId);
+  await arena.save();
+
+  return interaction.reply({ content: '✅ Deine Stimme wurde gezählt.', ephemeral: true });
+}
+
 // ─── Cron: Phasen-Übergänge ──────────────────────────────────────────────────
 
 async function processArenaTransitions(client) {
@@ -523,6 +635,7 @@ async function processArenaTransitions(client) {
       } else if (arena.status === 'aktiv' && now >= arena.voteAt) {
         arena.status = 'abstimmung';
         await arena.save();
+        await sendArenaVoteMessage(arena, client);
         logger.info(`Arena ${arena._id} → abstimmung`);
 
       } else if (arena.status === 'abstimmung' && now >= arena.endsAt) {
@@ -544,24 +657,35 @@ async function createDebateChannel(arena, client) {
 
   const config = await GuildConfig.findOne({ guildId: arena.guildId });
 
-  const debaterIds = arena.type === 'einzeln'
-    ? arena.debaters.map(d => d.userId)
-    : [];  // Für Gilden: keine individuellen Kanal-Permissions
+  // Stage-Kanal für Ping (und bei Einzeldebatte als Debattenbühne)
+  const stageChannel = config?.arenaStageChannelId
+    ? await discordGuild.channels.fetch(config.arenaStageChannelId).catch(() => null)
+    : null;
 
+  if (arena.type === 'einzeln') {
+    // Einzeldebatte findet im Stage-Kanal statt — kein separater Textkanal
+    const debaterIds = arena.debaters.map(d => d.userId);
+    const pingContent = debaterIds.map(id => `<@${id}>`).join(' ');
+
+    if (stageChannel) {
+      arena.channelId = stageChannel.id;
+      await arena.save();
+      await stageChannel.send({
+        content: pingContent,
+        embeds: [createEmbed({
+          title:       `⚔️ ${arena.topic}`,
+          color:       COLORS.WARNING,
+          description: (arena.description ?? '') + '\n\nDie Debatte beginnt jetzt! Abstimmung startet ' + formatTimestamp(arena.voteAt) + '.',
+        })],
+      }).catch(() => null);
+    }
+    return;
+  }
+
+  // Gildenkampf — separater Textkanal
   const overwrites = [
-    { id: discordGuild.id, type: OverwriteType.Role, deny: [PermissionFlagsBits.ViewChannel] },
-    // Alle können zuschauen (nur lesen)
     { id: discordGuild.id, type: OverwriteType.Role, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory], deny: [PermissionFlagsBits.SendMessages] },
   ];
-
-  // Debattanten dürfen schreiben
-  for (const userId of debaterIds) {
-    overwrites.push({
-      id:    userId,
-      type:  OverwriteType.Member,
-      allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
-    });
-  }
 
   let parent = null;
   if (config?.gildenChatMarkerChannelId) {
@@ -587,6 +711,18 @@ async function createDebateChannel(arena, client) {
         description: (arena.description ?? '') + '\n\nDie Debatte beginnt jetzt! Abstimmung startet ' + formatTimestamp(arena.voteAt) + '.',
       })],
     });
+  }
+
+  // Ping im Stage-Kanal für Gildenkampf
+  if (stageChannel) {
+    const GuildTeam = require('../models/GuildTeam');
+    const teamIds = arena.guilds.map(g => g.teamId);
+    const teams = await GuildTeam.find({ _id: { $in: teamIds } });
+    const rolePings = teams.filter(t => t.staffRoles?.teamRoleId).map(t => `<@&${t.staffRoles.teamRoleId}>`);
+    const pingContent = rolePings.length > 0 ? rolePings.join(' ') : arena.guilds.map(g => g.name).join(' vs ');
+    await stageChannel.send({
+      content: `${pingContent} ⚔️ Die Debatte **${arena.topic}** beginnt jetzt!`,
+    }).catch(() => null);
   }
 }
 
@@ -690,6 +826,8 @@ module.exports = {
   handleArenaEinzahlen,
   handleArenaAbstimmen,
   handleArenaAbstimmungSelect,
+  handleArenaVotePublicSelect,
   handleArenaPage,
+  handleArenaBackOverview,
   processArenaTransitions,
 };

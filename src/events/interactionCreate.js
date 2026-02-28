@@ -2147,6 +2147,10 @@ async function handleButton(interaction) {
     const as = require('../services/arenaService');
     return as.handleArenaPage(interaction);
   }
+  if (id === 'arena_back_overview') {
+    const as = require('../services/arenaService');
+    return as.handleArenaBackOverview(interaction);
+  }
   if (id.startsWith('arena_anmelden_')) {
     const as = require('../services/arenaService');
     return as.handleArenaAnmelden(interaction);
@@ -2746,6 +2750,10 @@ async function handleSelectMenu(interaction) {
   if (id.startsWith('arena_abstimmung_select_')) {
     const as = require('../services/arenaService');
     return as.handleArenaAbstimmungSelect(interaction);
+  }
+  if (id.startsWith('arena_vote_public_select_')) {
+    const as = require('../services/arenaService');
+    return as.handleArenaVotePublicSelect(interaction);
   }
 }
 

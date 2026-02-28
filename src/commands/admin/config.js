@@ -105,6 +105,15 @@ module.exports = {
           opt.setName('rolle').setDescription('Die Rolle').setRequired(true)
         )
     )
+    .addSubcommand(sub =>
+      sub
+        .setName('arenastage')
+        .setDescription('Stage-Kanal für Arena-Events (Server-Events werden damit verknüpft)')
+        .addChannelOption(opt =>
+          opt.setName('kanal').setDescription('Der Stage-Kanal').setRequired(true)
+            .addChannelTypes(ChannelType.GuildStageVoice)
+        )
+    )
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
@@ -129,6 +138,7 @@ module.exports = {
           { name: 'Gilden-Voice-Marker', value: config.gildenVoiceMarkerChannelId ? `<#${config.gildenVoiceMarkerChannelId}>` : 'Nicht gesetzt', inline: true },
           { name: 'Sitzwahl-Kanal', value: config.seatElectionChannelId ? `<#${config.seatElectionChannelId}>` : 'Nicht gesetzt', inline: true },
           { name: 'Sitz-Rolle (= Abstimmrecht)', value: config.sitzRoleId ? `<@&${config.sitzRoleId}>` : 'Nicht gesetzt', inline: true },
+          { name: 'Arena Stage-Kanal', value: config.arenaStageChannelId ? `<#${config.arenaStageChannelId}>` : 'Nicht gesetzt', inline: true },
         ],
       });
       return interaction.reply({ embeds: [embed], ephemeral: true });
@@ -156,6 +166,8 @@ module.exports = {
       config.seatElectionChannelId = interaction.options.getChannel('kanal').id;
     } else if (sub === 'sitzrolle') {
       config.sitzRoleId = interaction.options.getRole('rolle').id;
+    } else if (sub === 'arenastage') {
+      config.arenaStageChannelId = interaction.options.getChannel('kanal').id;
     }
 
     await config.save();

@@ -35,6 +35,9 @@ const arenaSchema = new mongoose.Schema({
   // Optionaler Debattenkanal
   channelId: { type: String, default: null },
 
+  // Discord Server-Event ID
+  eventId: { type: String, default: null },
+
   // Ergebnisse (befüllt wenn beendet)
   results: [{
     debaterId:  { type: String, required: true },
