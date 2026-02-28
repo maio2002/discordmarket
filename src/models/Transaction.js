@@ -12,6 +12,7 @@ const transactionSchema = new mongoose.Schema({
       'role_purchase', 'own_role', 'prestige', 'trade', 'service', 'shop',
       'admin_give', 'admin_remove', 'speaker', 'examination', 'quest', 'guild',
       'guild_salary', 'guild_contribution',
+      'arena', 'arena_wager',
     ],
     required: true,
   },

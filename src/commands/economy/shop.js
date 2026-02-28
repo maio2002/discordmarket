@@ -54,6 +54,11 @@ module.exports = {
         .setEmoji('💰')
         .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
+        .setCustomId('arena_view')
+        .setLabel('Arena')
+        .setEmoji('🏟️')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
         .setCustomId('gilden_view')
         .setLabel('Gilden')
         .setEmoji('⚔️')

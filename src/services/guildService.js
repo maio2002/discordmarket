@@ -5,6 +5,7 @@ const {
   ChannelType, OverwriteType, PermissionFlagsBits,
 } = require('discord.js');
 const GuildTeam = require('../models/GuildTeam');
+const GuildTask = require('../models/GuildTask');
 const coinService = require('./coinService');
 const { createEmbed, COLORS } = require('../utils/embedBuilder');
 const { formatCoins, formatNumber } = require('../utils/formatters');
@@ -82,9 +83,46 @@ function levelColor(level) {
   return map[level] ?? COLORS.PRIMARY;
 }
 
+function calcTotalContrib(team) {
+  return team.members.reduce((sum, id) => {
+    const personal = team.memberContributions?.get(id);
+    return sum + (personal != null ? personal : (team.weeklyContribution ?? 0));
+  }, 0);
+}
+
 // ─── Embed & Payload ─────────────────────────────────────────────────────────
 
 // ─── Detail-View (Gilden-Info + Basis-Aktionen) ───────────────────────────────
+
+function buildGildenNavRows(team, viewerId = null) {
+  const isLeader = viewerId && team.leaderId === viewerId;
+
+  const row1 = [
+    new ButtonBuilder().setCustomId('gilden_donate').setLabel('Spenden').setEmoji('💰').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('gilden_news').setLabel('News').setEmoji('📰').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('gilden_aufgaben_view').setLabel('Aufgaben').setEmoji('📋').setStyle(ButtonStyle.Secondary),
+  ];
+
+  if (isLeader) {
+    row1.push(new ButtonBuilder().setCustomId('gilden_manage').setLabel('Verwalten').setEmoji('🔧').setStyle(ButtonStyle.Primary));
+  } else {
+    row1.push(new ButtonBuilder().setCustomId('gilden_leave').setLabel('Verlassen').setEmoji('🚶').setStyle(ButtonStyle.Danger));
+  }
+
+  const rows = [new ActionRowBuilder().addComponents(row1)];
+
+  if (team.leaderless) {
+    rows.push(new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('gilden_claim_leader')
+        .setLabel(`Führung übernehmen (${formatCoins(GUILD.CLAIM_COST)})`)
+        .setEmoji('👑')
+        .setStyle(ButtonStyle.Primary),
+    ));
+  }
+
+  return rows;
+}
 
 function buildGildenEmbed(team, viewerId = null) {
   const levelName = GUILD.LEVELS[team.level]?.name ?? 'Unbekannt';
@@ -144,32 +182,7 @@ function buildGildenEmbed(team, viewerId = null) {
     footer: `Gegründet am ${founded}`,
   });
 
-  // Basis-Buttons Reihe 1: für alle Mitglieder
-  const isLeader = viewerId && team.leaderId === viewerId;
-
-  const row1 = [
-    new ButtonBuilder().setCustomId('gilden_donate').setLabel('Spenden').setEmoji('💰').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId('gilden_news').setLabel('News').setEmoji('📰').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('gilden_aufgaben_view').setLabel('Aufgaben').setEmoji('📋').setStyle(ButtonStyle.Secondary),
-  ];
-
-  if (isLeader) {
-    row1.push(new ButtonBuilder().setCustomId('gilden_manage').setLabel('Verwalten').setEmoji('🔧').setStyle(ButtonStyle.Primary));
-  } else {
-    row1.push(new ButtonBuilder().setCustomId('gilden_leave').setLabel('Verlassen').setEmoji('🚶').setStyle(ButtonStyle.Danger));
-  }
-
-  const components = [new ActionRowBuilder().addComponents(row1)];
-
-  if (team.leaderless) {
-    components.push(new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId('gilden_claim_leader')
-        .setLabel(`Führung übernehmen (${formatCoins(GUILD.CLAIM_COST)})`)
-        .setEmoji('👑')
-        .setStyle(ButtonStyle.Primary),
-    ));
-  }
+  const components = buildGildenNavRows(team, viewerId);
 
   return { embeds: [embed], components };
 }
@@ -181,7 +194,7 @@ function buildManagePayload(team) {
 
   let description = '🔧 Verwalte deine Gilde.';
   if (pending.length > 0) {
-    description += `\n\n📥 **${pending.length} offene Beitrittsanfrage(n):** ${pending.map(id => `<@${id}>`).join(', ')}\n*Öffne dein Postfach unter Kontostand, um Anfragen anzunehmen oder abzulehnen.*`;
+    description += `\n\n📥 **${pending.length} offene Beitrittsanfrage(n)** — öffne **Mitglieder** um sie zu bearbeiten.`;
   }
 
   const embed = createEmbed({
@@ -191,16 +204,13 @@ function buildManagePayload(team) {
   });
 
   const row1 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('gilden_invite').setLabel('Einladen').setEmoji('➕').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('gilden_kick').setLabel('Kick').setEmoji('🚪').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('gilden_manifest').setLabel('Manifest').setEmoji('📜').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('gilden_aufgaben_manage').setLabel('Aufgaben').setEmoji('📋').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('gilden_mitglieder_manage').setLabel('Mitglieder').setEmoji('👥').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('gilden_finanzen_manage').setLabel('Finanzen').setEmoji('💰').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('gilden_redaktion').setLabel('Redaktion').setEmoji('✍️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('gilden_disband').setLabel('Auflösen').setEmoji('💀').setStyle(ButtonStyle.Danger),
   );
 
-  const row2Buttons = [
-    new ButtonBuilder().setCustomId('gilden_sitze').setLabel('Sitze').setEmoji('🏛️').setStyle(ButtonStyle.Secondary),
-  ];
+  const row2Buttons = [];
   if (team.level >= 1) {
     row2Buttons.push(
       new ButtonBuilder().setCustomId('gilden_role_color').setLabel('Rolle anpassen').setEmoji('🎨').setStyle(ButtonStyle.Secondary),
@@ -212,9 +222,94 @@ function buildManagePayload(team) {
     );
   }
 
-  const components = [row1, new ActionRowBuilder().addComponents(row2Buttons)];
+  const components = [row1];
+  if (row2Buttons.length) components.push(new ActionRowBuilder().addComponents(row2Buttons));
 
   return { embeds: [embed], components };
+}
+
+// ─── Mitglieder-Subpanel ─────────────────────────────────────────────────────
+
+async function handleMitgliederManage(interaction) {
+  const { guild, user } = interaction;
+  const team = await GuildTeam.findOne({ guildId: guild.id, leaderId: user.id });
+  if (!team) return interaction.reply({ content: '❌ Nur der Anführer kann Mitglieder verwalten.', ephemeral: true });
+
+  const pending = team.pendingRequests ?? [];
+  const fields = [
+    { name: `👥 Mitglieder (${team.members.length})`, value: team.members.map(id => `<@${id}>`).join(' ') || '—' },
+  ];
+  if (pending.length) {
+    fields.push({ name: `📥 Offene Anfragen (${pending.length})`, value: pending.map(id => `<@${id}>`).join(', ') });
+  }
+
+  const embed = createEmbed({
+    title: `👥 Mitglieder — ${team.name}`,
+    color: COLORS.PRIMARY,
+    fields,
+  });
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('gilden_invite').setLabel('Einladen').setEmoji('➕').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('gilden_kick').setLabel('Kick').setEmoji('🚪').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('gilden_sitze').setLabel('Sitze').setEmoji('🏛️').setStyle(ButtonStyle.Secondary),
+  );
+
+  return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+}
+
+// ─── Finanzen-Subpanel ────────────────────────────────────────────────────────
+
+async function handleFinanzenManage(interaction) {
+  const { guild, user } = interaction;
+  const team = await GuildTeam.findOne({ guildId: guild.id, leaderId: user.id });
+  if (!team) return interaction.reply({ content: '❌ Nur der Anführer kann die Finanzen verwalten.', ephemeral: true });
+
+  const tasks        = await GuildTask.find({ teamId: team._id.toString() }).lean();
+  const dauerhaft    = tasks.filter(t => t.type === 'dauerhaft');
+  const totalSalary  = dauerhaft.reduce((s, t) => s + t.reward * (t.assignees?.length ?? 0), 0);
+  const totalContrib = calcTotalContrib(team);
+  const balanceOk    = totalContrib >= totalSalary;
+
+  const contribLines = team.members.map(id => {
+    const personal = team.memberContributions?.get(id);
+    const amount   = personal != null ? personal : (team.weeklyContribution ?? 0);
+    return amount > 0
+      ? `• <@${id}> — ${formatCoins(amount)}/Woche${personal == null ? ' *(Standard)*' : ''}`
+      : null;
+  }).filter(Boolean);
+
+  const fields = [
+    { name: '💰 Kasse',               value: formatCoins(team.treasury),            inline: true },
+    { name: '📥 Wochenbeiträge',       value: `${formatCoins(totalContrib)}/Woche`,  inline: true },
+    { name: '💸 Dauerhafte Gehälter',  value: `${formatCoins(totalSalary)}/Woche`,   inline: true },
+  ];
+
+  if (contribLines.length) {
+    fields.push({ name: 'Beitrag pro Mitglied', value: contribLines.join('\n') });
+  }
+
+  if (dauerhaft.length) {
+    fields.push({
+      name:  'Bilanz',
+      value: balanceOk
+        ? '✅ Wochenbeiträge decken alle Gehälter.'
+        : `⚠️ Fehlbetrag: **${formatCoins(totalSalary - totalContrib)}** — Beitrag erhöhen oder Stellen streichen!`,
+    });
+  }
+
+  const embed = createEmbed({
+    title: `💰 Finanzen — ${team.name}`,
+    color: balanceOk ? COLORS.PRIMARY : COLORS.WARNING,
+    fields,
+  });
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('gilden_aufgaben_manage').setLabel('Aufgaben').setEmoji('📋').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('aufgabe_beitrag').setLabel('Mitgliedsbeitrag').setEmoji('💰').setStyle(ButtonStyle.Secondary),
+  );
+
+  return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
 }
 
 async function buildNoGildePayload(guildId) {
@@ -246,6 +341,86 @@ async function buildNoGildePayload(guildId) {
   );
 
   return { embeds: [embed], components: [new ActionRowBuilder().addComponents(buttons)] };
+}
+
+async function buildAlleGildenPayload(discordGuildId, page, showManifest = false) {
+  const teams = await GuildTeam.find({ guildId: discordGuildId }).sort({ level: -1, name: 1 }).lean();
+  if (!teams.length) return null;
+
+  const total = teams.length;
+  const p     = Math.max(0, Math.min(page, total - 1));
+  const t     = teams[p];
+
+  const levelName = GUILD.LEVELS[t.level]?.name ?? 'Unbekannt';
+  const founded   = new Date(t.foundedAt);
+  const foundedStr = `${String(founded.getDate()).padStart(2, '0')}.${String(founded.getMonth() + 1).padStart(2, '0')}.${founded.getFullYear()}`;
+
+  const embedOptions = {
+    title:  `⚔️ ${t.name}`,
+    color:  levelColor(t.level),
+    footer: `Gilde ${p + 1} / ${total}`,
+    ...(showManifest
+      ? { description: t.description ?? '*Kein Manifest verfasst.*' }
+      : { fields: [
+          { name: '📈 Stufe',       value: `${t.level} — ${levelName}`,              inline: true },
+          { name: '👑 Leiter',      value: `<@${t.leaderId}>`,                       inline: true },
+          { name: '👥 Mitglieder',  value: `${t.members.length}`,                    inline: true },
+          { name: '💰 Kasse',       value: formatCoins(t.treasury),                  inline: true },
+          { name: '🏛️ Sitze',      value: `${t.assignedSeats.length} / ${t.seats}`, inline: true },
+          { name: '📅 Gegründet',   value: foundedStr,                               inline: true },
+        ],
+      }
+    ),
+  };
+
+  const manifestId = showManifest
+    ? `gilden_alle_manifest_hide_${discordGuildId}_${p}`
+    : `gilden_alle_manifest_show_${discordGuildId}_${p}`;
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(p > 0 ? `gilden_alle_page_${discordGuildId}_${p - 1}` : 'gilden_alle_noop1')
+      .setLabel('◀')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(p === 0),
+    new ButtonBuilder()
+      .setCustomId(manifestId)
+      .setLabel('Manifest')
+      .setEmoji('📜')
+      .setStyle(showManifest ? ButtonStyle.Primary : ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(p < total - 1 ? `gilden_alle_page_${discordGuildId}_${p + 1}` : 'gilden_alle_noop2')
+      .setLabel('▶')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(p === total - 1),
+  );
+
+  return { embeds: [createEmbed(embedOptions)], components: [row] };
+}
+
+async function handleAlleGildenView(interaction) {
+  const payload = await buildAlleGildenPayload(interaction.guild.id, 0);
+  if (!payload) return interaction.reply({ content: '❌ Es gibt noch keine Gilden auf diesem Server.', ephemeral: true });
+  return interaction.reply({ ...payload, ephemeral: true });
+}
+
+async function handleAlleGildenPage(interaction) {
+  const page           = parseInt(interaction.customId.split('_').at(-1), 10);
+  const discordGuildId = interaction.customId.slice('gilden_alle_page_'.length, interaction.customId.lastIndexOf('_'));
+  const payload        = await buildAlleGildenPayload(discordGuildId, page);
+  if (!payload) return interaction.update({ content: '❌ Keine Gilden gefunden.', embeds: [], components: [] });
+  return interaction.update(payload);
+}
+
+async function handleAlleGildenManifestToggle(interaction) {
+  const isShow         = interaction.customId.startsWith('gilden_alle_manifest_show_');
+  const prefix         = isShow ? 'gilden_alle_manifest_show_' : 'gilden_alle_manifest_hide_';
+  const rest           = interaction.customId.slice(prefix.length);
+  const page           = parseInt(rest.split('_').at(-1), 10);
+  const discordGuildId = rest.slice(0, rest.lastIndexOf('_'));
+  const payload        = await buildAlleGildenPayload(discordGuildId, page, isShow);
+  if (!payload) return interaction.update({ content: '❌ Keine Gilden gefunden.', embeds: [], components: [] });
+  return interaction.update(payload);
 }
 
 async function getGildenPayload(guildId, userId) {
@@ -1034,64 +1209,131 @@ async function handleAnfragenAblehnenSelect(interaction) {
 
 // ─── Gilden-News ─────────────────────────────────────────────────────────────
 
-function buildNewsPayload(team, page, isLeader) {
+function buildNewsPayload(team, page, isLeader, showNav = true, showManifest = false) {
   const teamId = team._id.toString();
   const news   = (team.news ?? []).slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   const total  = news.length;
+  const p      = Math.max(0, Math.min(page, total - 1));
+
+  // Manifest-Toggle-Button (nur für Mitglieder, nicht Leader)
+  const manifestBtn = !isLeader
+    ? new ButtonBuilder()
+        .setCustomId(showManifest
+          ? `gilden_news_manifest_hide_${teamId}_${p}`
+          : `gilden_news_manifest_show_${teamId}_${p}`)
+        .setLabel(showManifest ? 'Zurück' : 'Manifest')
+        .setEmoji(showManifest ? '📰' : '📜')
+        .setStyle(showManifest ? ButtonStyle.Primary : ButtonStyle.Secondary)
+    : null;
+
+  // Manifest-Ansicht
+  if (showManifest) {
+    const embed = createEmbed({
+      title:       `📜 Manifest — ${team.name}`,
+      color:       COLORS.PRIMARY,
+      description: team.description ?? '*Diese Gilde hat noch kein Manifest verfasst.*',
+    });
+    return {
+      embeds:     [embed],
+      components: [new ActionRowBuilder().addComponents(manifestBtn)],
+    };
+  }
+
+  // Leader-Buttons (Redaktion)
+  const leaderButtons = isLeader
+    ? [
+        new ButtonBuilder().setCustomId('gilden_news_add').setLabel('Neuigkeit').setEmoji('➕').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('gilden_manifest').setLabel('Manifest bearbeiten').setEmoji('📜').setStyle(ButtonStyle.Secondary),
+      ]
+    : [];
 
   if (!total) {
     const embed = createEmbed({
-      title:       '📰 Gilden-Neuigkeiten',
+      title:       '📰 Gilden-News',
       color:       COLORS.PRIMARY,
       description: '*Noch keine Neuigkeiten vorhanden.*',
     });
-    const components = isLeader
-      ? [new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('gilden_news_add').setLabel('Neuigkeit hinzufügen').setEmoji('➕').setStyle(ButtonStyle.Primary),
-        )]
-      : [];
-    return { embeds: [embed], components };
+    const btns = [...leaderButtons, ...(manifestBtn ? [manifestBtn] : [])];
+    return {
+      embeds:     [embed],
+      components: btns.length ? [new ActionRowBuilder().addComponents(btns)] : [],
+    };
   }
 
-  const p    = Math.max(0, Math.min(page, total - 1));
-  const item = news[p];
-  const d    = new Date(item.createdAt);
+  const item    = news[p];
+  const d       = new Date(item.createdAt);
   const dateStr = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
 
   const embed = createEmbed({
-    title:       '📰 Gilden-Neuigkeiten',
+    title:       '📰 Gilden-News',
     color:       COLORS.PRIMARY,
     description: item.content,
     fields:      [{ name: 'Verfasst von', value: `<@${item.authorId}>`, inline: true }],
     footer:      `Seite ${p + 1} / ${total} · ${dateStr}`,
   });
 
-  const buttons = [
-    new ButtonBuilder()
-      .setCustomId(p > 0 ? `gilden_news_page_${teamId}_${p - 1}` : 'gilden_news_noop')
-      .setLabel('◀ Zurück')
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(p === 0),
-    new ButtonBuilder()
-      .setCustomId(p < total - 1 ? `gilden_news_page_${teamId}_${p + 1}` : 'gilden_news_noop2')
-      .setLabel('Weiter ▶')
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(p === total - 1),
-  ];
-  if (isLeader) {
-    buttons.push(
-      new ButtonBuilder().setCustomId('gilden_news_add').setLabel('Hinzufügen').setEmoji('➕').setStyle(ButtonStyle.Primary),
-    );
-  }
+  const navButtons = showNav
+    ? [
+        new ButtonBuilder()
+          .setCustomId(p > 0 ? `gilden_news_page_${teamId}_${p - 1}` : 'gilden_news_noop')
+          .setLabel('◀')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(p === 0),
+        new ButtonBuilder()
+          .setCustomId(p < total - 1 ? `gilden_news_page_${teamId}_${p + 1}` : 'gilden_news_noop2')
+          .setLabel('▶')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(p === total - 1),
+      ]
+    : [];
 
-  return { embeds: [embed], components: [new ActionRowBuilder().addComponents(buttons)] };
+  const buttons = [...navButtons, ...leaderButtons, ...(manifestBtn ? [manifestBtn] : [])];
+
+  return { embeds: [embed], components: buttons.length ? [new ActionRowBuilder().addComponents(buttons)] : [] };
+}
+
+async function handleNewsManifestToggle(interaction) {
+  const isShow = interaction.customId.startsWith('gilden_news_manifest_show_');
+  const prefix = isShow ? 'gilden_news_manifest_show_' : 'gilden_news_manifest_hide_';
+  const rest   = interaction.customId.slice(prefix.length);
+  const page   = parseInt(rest.split('_').at(-1), 10);
+  const teamId = rest.slice(0, rest.lastIndexOf('_'));
+
+  const team = await GuildTeam.findById(teamId);
+  if (!team) return interaction.reply({ content: '❌ Gilde nicht gefunden.', ephemeral: true });
+
+  const payload = buildNewsPayload(team, page, false, true, isShow);
+  payload.components = [...payload.components, ...buildGildenNavRows(team, interaction.user.id)];
+  return interaction.update(payload);
 }
 
 async function handleNewsView(interaction) {
   const { guild, user } = interaction;
   const team = await GuildTeam.findOne({ guildId: guild.id, members: user.id });
   if (!team) return interaction.reply({ content: '❌ Du bist in keiner Gilde.', ephemeral: true });
-  return interaction.reply({ ...buildNewsPayload(team, 0, team.leaderId === user.id), ephemeral: true });
+  const payload = buildNewsPayload(team, 0, false);
+  payload.components = [...payload.components, ...buildGildenNavRows(team, user.id)];
+  return interaction.update(payload);
+}
+
+async function handleRedaktionView(interaction) {
+  const { guild, user } = interaction;
+  const team = await GuildTeam.findOne({ guildId: guild.id, leaderId: user.id });
+  if (!team) return interaction.reply({ content: '❌ Nur der Anführer kann die Redaktion öffnen.', ephemeral: true });
+  return interaction.reply({ ...buildNewsPayload(team, 0, true, false), ephemeral: true });
+}
+
+async function handleManifestView(interaction) {
+  const teamId = interaction.customId.replace('gilden_manifest_view_', '');
+  const team = await GuildTeam.findById(teamId);
+  if (!team) return interaction.reply({ content: '❌ Gilde nicht gefunden.', ephemeral: true });
+
+  const embed = createEmbed({
+    title:       `📜 Manifest — ${team.name}`,
+    color:       COLORS.PRIMARY,
+    description: team.description ?? '*Diese Gilde hat noch kein Manifest verfasst.*',
+  });
+  return interaction.reply({ embeds: [embed], ephemeral: true });
 }
 
 async function handleNewsPage(interaction) {
@@ -1456,15 +1698,6 @@ async function handleClaimLeadership(interaction) {
 
 // ─── Gilden-Aufgaben (einmalig & dauerhaft) ───────────────────────────────────
 
-const GuildTask = require('../models/GuildTask');
-
-function calcTotalContrib(team) {
-  return team.members.reduce((sum, id) => {
-    const personal = team.memberContributions?.get(id);
-    return sum + (personal != null ? personal : (team.weeklyContribution ?? 0));
-  }, 0);
-}
-
 // ── Leader-Verwaltung ─────────────────────────────────────────────────────────
 
 async function handleAufgabenManage(interaction) {
@@ -1529,11 +1762,7 @@ async function handleAufgabenManage(interaction) {
     new ButtonBuilder().setCustomId('aufgabe_remove').setLabel('Aufgabe löschen').setEmoji('🗑️').setStyle(ButtonStyle.Danger).setDisabled(!hasTasks),
   );
 
-  const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('aufgabe_beitrag').setLabel('Wochenbeitrag').setEmoji('💰').setStyle(ButtonStyle.Secondary),
-  );
-
-  return interaction.reply({ embeds: [embed], components: [row1, row2], ephemeral: true });
+  return interaction.reply({ embeds: [embed], components: [row1], ephemeral: true });
 }
 
 function showCreateAufgabeModal(interaction, type) {
@@ -1800,9 +2029,6 @@ async function handleAufgabenView(interaction) {
   if (!team) return interaction.reply({ content: '❌ Du bist in keiner Gilde.', ephemeral: true });
 
   const tasks = await GuildTask.find({ teamId: team._id.toString() }).lean();
-  if (!tasks.length) {
-    return interaction.reply({ content: '❌ Diese Gilde hat noch keine Aufgaben ausgeschrieben.', ephemeral: true });
-  }
 
   const myAssignments = tasks.filter(t => t.assignees?.some(a => a.userId === user.id));
 
@@ -1886,7 +2112,7 @@ async function handleAufgabenView(interaction) {
     );
   }
 
-  return interaction.reply({ embeds: [embed], components, ephemeral: true });
+  return interaction.update({ embeds: [embed], components: [...components, ...buildGildenNavRows(team, user.id)] });
 }
 
 async function handleAufgabeApplySelect(interaction) {
@@ -2065,6 +2291,9 @@ async function handleSetContribution(interaction) {
 
 module.exports = {
   getGildenPayload,
+  handleAlleGildenView,
+  handleAlleGildenPage,
+  handleAlleGildenManifestToggle,
   handleGildenButton,
   handleGildenViewDetail,
   handleManageView,
@@ -2084,6 +2313,8 @@ module.exports = {
   showInviteModal,
   showManifestModal,
   handleManifest,
+  handleMitgliederManage,
+  handleFinanzenManage,
   handleJoin,
   handleJoinSelect,
   handleJoinClaimConfirm,
@@ -2092,6 +2323,9 @@ module.exports = {
   handleAnfragenAblehnen,
   handleAnfragenAblehnenSelect,
   handleNewsView,
+  handleRedaktionView,
+  handleManifestView,
+  handleNewsManifestToggle,
   handleNewsPage,
   showNewsAddModal,
   handleNewsAdd,

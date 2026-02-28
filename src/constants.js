@@ -61,6 +61,14 @@ module.exports = {
     MAX_SEATS:      67,
     ELECTION_DAYS:  3,   // Wie viele Tage die Wahl läuft
   },
+  ARENA: {
+    MIN_DEBATERS:     2,
+    MAX_DEBATERS:     8,
+    MIN_WAGER:        500,
+    MIN_CONTRIBUTION: 100,
+    MIN_OPEN_MINUTES: 5,
+    MAX_OPEN_MINUTES: 1440,
+  },
   GUILD: {
     FOUND_COST:  5000,
     CLAIM_COST:  1000,

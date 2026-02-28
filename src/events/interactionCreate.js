@@ -1796,6 +1796,13 @@ async function handleButton(interaction) {
     return interaction.update({ embeds: [embed], components });
   }
 
+  // ── Arena (Shortcut aus Shop) ────────────────────────────────────────────────
+  if (id === 'arena_view') {
+    const as = require('../services/arenaService');
+    const payload = await as.getArenaOverviewPayload(interaction.guild.id, interaction.user.id, interaction.member);
+    return interaction.reply({ ...payload, ephemeral: true });
+  }
+
   // ── Gilden ──────────────────────────────────────────────────────────────────
   if (id === 'gilden_view') {
     const gs = require('../services/guildService');
@@ -1859,13 +1866,37 @@ async function handleButton(interaction) {
     const gs = require('../services/guildService');
     return gs.showManifestModal(interaction);
   }
+  if (id === 'gilden_alle_view') {
+    const gs = require('../services/guildService');
+    return gs.handleAlleGildenView(interaction);
+  }
+  if (id.startsWith('gilden_alle_page_')) {
+    const gs = require('../services/guildService');
+    return gs.handleAlleGildenPage(interaction);
+  }
+  if (id.startsWith('gilden_alle_manifest_show_') || id.startsWith('gilden_alle_manifest_hide_')) {
+    const gs = require('../services/guildService');
+    return gs.handleAlleGildenManifestToggle(interaction);
+  }
   if (id === 'gilden_news') {
     const gs = require('../services/guildService');
     return gs.handleNewsView(interaction);
   }
+  if (id === 'gilden_redaktion') {
+    const gs = require('../services/guildService');
+    return gs.handleRedaktionView(interaction);
+  }
+  if (id.startsWith('gilden_manifest_view_')) {
+    const gs = require('../services/guildService');
+    return gs.handleManifestView(interaction);
+  }
   if (id.startsWith('gilden_news_page_')) {
     const gs = require('../services/guildService');
     return gs.handleNewsPage(interaction);
+  }
+  if (id.startsWith('gilden_news_manifest_show_') || id.startsWith('gilden_news_manifest_hide_')) {
+    const gs = require('../services/guildService');
+    return gs.handleNewsManifestToggle(interaction);
   }
   if (id === 'gilden_news_add') {
     const gs = require('../services/guildService');
@@ -1874,6 +1905,14 @@ async function handleButton(interaction) {
   if (id === 'gilden_sitze') {
     const ss = require('../services/seatService');
     return ss.handleSeatManage(interaction);
+  }
+  if (id === 'gilden_mitglieder_manage') {
+    const gs = require('../services/guildService');
+    return gs.handleMitgliederManage(interaction);
+  }
+  if (id === 'gilden_finanzen_manage') {
+    const gs = require('../services/guildService');
+    return gs.handleFinanzenManage(interaction);
   }
   if (id === 'gilden_join') {
     const gs = require('../services/guildService');
@@ -2093,6 +2132,32 @@ async function handleButton(interaction) {
   if (id.startsWith('aufgabe_reject_')) {
     const gs = require('../services/guildService');
     return gs.handleAufgabeReject(interaction);
+  }
+
+  // ── Arena ──────────────────────────────────────────────────────────────────
+  if (id === 'arena_erstellen') {
+    const as = require('../services/arenaService');
+    return as.showCreateArenaModal(interaction);
+  }
+  if (id.startsWith('arena_page_')) {
+    const as = require('../services/arenaService');
+    return as.handleArenaPage(interaction);
+  }
+  if (id.startsWith('arena_anmelden_')) {
+    const as = require('../services/arenaService');
+    return as.handleArenaAnmelden(interaction);
+  }
+  if (id.startsWith('arena_gilde_anmelden_')) {
+    const as = require('../services/arenaService');
+    return as.handleArenaGildeAnmelden(interaction);
+  }
+  if (id.startsWith('arena_einzahlen_')) {
+    const as = require('../services/arenaService');
+    return as.showArenaEinzahlenModal(interaction);
+  }
+  if (id.startsWith('arena_abstimmen_')) {
+    const as = require('../services/arenaService');
+    return as.handleArenaAbstimmen(interaction);
   }
 }
 
@@ -2663,6 +2728,16 @@ async function handleSelectMenu(interaction) {
   if (id === 'aufgabe_delete_select') {
     const gs = require('../services/guildService');
     return gs.handleAufgabeDeleteSelect(interaction);
+  }
+
+  // ── Arena ──────────────────────────────────────────────────────────────────
+  if (id.startsWith('arena_type_select_')) {
+    const as = require('../services/arenaService');
+    return as.handleArenaTypeSelect(interaction);
+  }
+  if (id.startsWith('arena_abstimmung_select_')) {
+    const as = require('../services/arenaService');
+    return as.handleArenaAbstimmungSelect(interaction);
   }
 }
 
@@ -3336,5 +3411,23 @@ async function handleModal(interaction) {
   if (id === 'modal_verfassung') {
     const rs = require('../services/ratService');
     return rs.handleConstitutionModalSubmit(interaction);
+  }
+
+  // ── Arena ──────────────────────────────────────────────────────────────────
+  if (id === 'modal_arena_erstellen') {
+    const as = require('../services/arenaService');
+    return as.handleCreateArena(interaction);
+  }
+  if (id.startsWith('modal_arena_dauer_')) {
+    const as = require('../services/arenaService');
+    return as.handleArenaDauerModal(interaction);
+  }
+  if (id.startsWith('modal_arena_einzahlen_')) {
+    const as = require('../services/arenaService');
+    return as.handleArenaEinzahlen(interaction);
+  }
+  if (id.startsWith('modal_arena_wager_')) {
+    const as = require('../services/arenaService');
+    return as.handleArenaWager(interaction);
   }
 }

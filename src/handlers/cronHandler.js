@@ -41,6 +41,12 @@ function startCronJobs(client) {
     } catch (err) {
       logger.error('Fehler beim Schließen abgelaufener Sitzwahlen:', err);
     }
+    try {
+      const arenaService = require('../services/arenaService');
+      await arenaService.processArenaTransitions(client);
+    } catch (err) {
+      logger.error('Fehler beim Arena-Phasen-Übergang:', err);
+    }
   });
   logger.info('Serverrat Auto-Close Cron gestartet (5min Intervall).');
 
