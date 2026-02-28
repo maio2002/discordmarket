@@ -1812,6 +1812,10 @@ async function handleButton(interaction) {
     const gs = require('../services/guildService');
     return gs.handleGildenViewDetail(interaction);
   }
+  if (id === 'gilden_back_main') {
+    const gs = require('../services/guildService');
+    return gs.handleGildenBackMain(interaction);
+  }
   if (id === 'gilden_manage') {
     const gs = require('../services/guildService');
     return gs.handleManageView(interaction);
@@ -2731,9 +2735,13 @@ async function handleSelectMenu(interaction) {
   }
 
   // ── Arena ──────────────────────────────────────────────────────────────────
-  if (id.startsWith('arena_type_select_')) {
+  if (id === 'arena_type_select' || id.startsWith('arena_type_select_')) {
     const as = require('../services/arenaService');
     return as.handleArenaTypeSelect(interaction);
+  }
+  if (id.startsWith('arena_anmelden_type_select_')) {
+    const as = require('../services/arenaService');
+    return as.handleArenaAnmeldenTypeSelect(interaction);
   }
   if (id.startsWith('arena_abstimmung_select_')) {
     const as = require('../services/arenaService');
@@ -3418,7 +3426,7 @@ async function handleModal(interaction) {
     const as = require('../services/arenaService');
     return as.handleCreateArena(interaction);
   }
-  if (id.startsWith('modal_arena_dauer_')) {
+  if (id === 'modal_arena_dauer' || id.startsWith('modal_arena_dauer_')) {
     const as = require('../services/arenaService');
     return as.handleArenaDauerModal(interaction);
   }

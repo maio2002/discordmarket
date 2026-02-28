@@ -369,7 +369,8 @@ async function handleSeatRevokeSelect(interaction) {
 // ─── Sitzverteilung anzeigen ──────────────────────────────────────────────────
 
 async function handleSeatList(interaction) {
-  const { guild } = interaction;
+  const { guild, user } = interaction;
+  const { components: panelComponents } = await require('./guildService').getGildenPayload(guild.id, user.id);
 
   // Aktive Wahl prüfen
   const election = await SeatElection.findOne({ guildId: guild.id, status: 'active' });
@@ -379,10 +380,10 @@ async function handleSeatList(interaction) {
     const voteCounts = getVoteCounts(election);
     const embed      = buildSeatElectionEmbed(election, teams, voteCounts);
 
-    const alreadyVoted = election.votes.some(v => v.userId === interaction.user.id);
-    const row = alreadyVoted ? [] : [buildSeatVoteButton(election._id)];
+    const alreadyVoted = election.votes.some(v => v.userId === user.id);
+    const voteRows = alreadyVoted ? [] : [buildSeatVoteButton(election._id)];
 
-    return interaction.update({ embeds: [embed], components: row });
+    return interaction.update({ embeds: [embed], components: [...voteRows, ...panelComponents] });
   }
 
   // Keine aktive Wahl — Sitzverteilung + nächste Wahl anzeigen
@@ -416,7 +417,7 @@ async function handleSeatList(interaction) {
     footer: `${totalAssigned}/${totalSeats} Sitze besetzt · max. ${MAX_SEATS}`,
   });
 
-  return interaction.update({ embeds: [embed], components: [] });
+  return interaction.update({ embeds: [embed], components: panelComponents });
 }
 
 module.exports = {

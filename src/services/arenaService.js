@@ -21,6 +21,9 @@ const { formatCoins, formatTimestamp } = require('../utils/formatters');
 const { ARENA } = require('../constants');
 const logger = require('../utils/logger');
 
+// ─── Temporärer Erstellungs-Cache (topic/description/type pro User) ──────────
+const pendingArena = new Map(); // key: `${guildId}_${userId}` → { topic, description, type? }
+
 // ─── Hilfsfunktionen ─────────────────────────────────────────────────────────
 
 function statusLabel(status) {
@@ -179,11 +182,12 @@ async function handleCreateArena(interaction) {
   const topic       = interaction.fields.getTextInputValue('topic').trim();
   const description = interaction.fields.getTextInputValue('description').trim() || null;
 
-  // Zwischenspeicher: topic+description im customId der Antwort für den nächsten Schritt
-  const encoded = encodeURIComponent(JSON.stringify({ topic, description }));
+  // Im Cache speichern statt im customId (Discord-Limit: 100 Zeichen)
+  const key = `${interaction.guild.id}_${interaction.user.id}`;
+  pendingArena.set(key, { topic, description });
 
   const select = new StringSelectMenuBuilder()
-    .setCustomId(`arena_type_select_${encoded}`)
+    .setCustomId('arena_type_select')
     .setPlaceholder('Arena-Typ wählen')
     .addOptions(
       new StringSelectMenuOptionBuilder().setLabel('Einzeldebatte').setValue('einzeln').setDescription('Einzelne Nutzer treten gegeneinander an').setEmoji('🎤'),
@@ -198,18 +202,18 @@ async function handleCreateArena(interaction) {
 }
 
 async function handleArenaTypeSelect(interaction) {
-  const parts   = interaction.customId.split('arena_type_select_');
-  const encoded = parts[1];
-  let meta;
-  try { meta = JSON.parse(decodeURIComponent(encoded)); } catch { return interaction.reply({ content: '❌ Interner Fehler.', ephemeral: true }); }
+  const key  = `${interaction.guild.id}_${interaction.user.id}`;
+  const meta = pendingArena.get(key);
+  if (!meta) return interaction.reply({ content: '❌ Sitzung abgelaufen. Bitte starte den Vorgang neu.', ephemeral: true });
 
   const type = interaction.values[0];
-  await showArenaDauerModal(interaction, type, meta);
+  pendingArena.set(key, { ...meta, type });
+  await showArenaDauerModal(interaction, type);
 }
 
-async function showArenaDauerModal(interaction, type, meta) {
+async function showArenaDauerModal(interaction, type) {
   const modal = new ModalBuilder()
-    .setCustomId(`modal_arena_dauer_${type}_${encodeURIComponent(JSON.stringify(meta))}`)
+    .setCustomId('modal_arena_dauer')
     .setTitle('Phasen-Dauer festlegen');
   modal.addComponents(
     new ActionRowBuilder().addComponents(
@@ -226,14 +230,12 @@ async function showArenaDauerModal(interaction, type, meta) {
 }
 
 async function handleArenaDauerModal(interaction) {
-  // customId: modal_arena_dauer_{type}_{encodedMeta}
-  const withoutPrefix = interaction.customId.slice('modal_arena_dauer_'.length);
-  const typeEnd        = withoutPrefix.indexOf('_');
-  const type           = withoutPrefix.slice(0, typeEnd);
-  const encoded        = withoutPrefix.slice(typeEnd + 1);
+  const cacheKey = `${interaction.guild.id}_${interaction.user.id}`;
+  const meta     = pendingArena.get(cacheKey);
+  if (!meta) return interaction.reply({ content: '❌ Sitzung abgelaufen. Bitte starte den Vorgang neu.', ephemeral: true });
 
-  let meta;
-  try { meta = JSON.parse(decodeURIComponent(encoded)); } catch { return interaction.reply({ content: '❌ Interner Fehler.', ephemeral: true }); }
+  const { topic, description, type } = meta;
+  pendingArena.delete(cacheKey);
 
   const parse = (key) => {
     const v = parseInt(interaction.fields.getTextInputValue(key), 10);
@@ -255,8 +257,8 @@ async function handleArenaDauerModal(interaction) {
   const arena = await Arena.create({
     guildId:     interaction.guild.id,
     creatorId:   interaction.user.id,
-    topic:       meta.topic,
-    description: meta.description,
+    topic,
+    description,
     type,
     activeAt,
     voteAt,
@@ -266,7 +268,7 @@ async function handleArenaDauerModal(interaction) {
   const embed = createEmbed({
     title:       '✅ Arena erstellt!',
     color:       COLORS.SUCCESS,
-    description: `**${meta.topic}**`,
+    description: `**${topic}**`,
     fields: [
       { name: '📋 Typ',        value: type === 'einzeln' ? 'Einzeldebatte' : 'Gildenkampf', inline: true },
       { name: '📅 Debatte ab', value: formatTimestamp(activeAt),                            inline: true },
@@ -278,22 +280,80 @@ async function handleArenaDauerModal(interaction) {
   return interaction.reply({ embeds: [embed], ephemeral: true });
 }
 
-// ─── Anmelden (Einzeldebattant) ───────────────────────────────────────────────
+// ─── Anmelden ────────────────────────────────────────────────────────────────
 
 async function handleArenaAnmelden(interaction) {
   const arenaId = interaction.customId.replace('arena_anmelden_', '');
   const arena   = await Arena.findById(arenaId);
 
   if (!arena || arena.guildId !== interaction.guild.id) return interaction.reply({ content: '❌ Arena nicht gefunden.', ephemeral: true });
-  if (arena.type !== 'einzeln') return interaction.reply({ content: '❌ Das ist ein Gildenkampf.', ephemeral: true });
   if (arena.status !== 'offen') return interaction.reply({ content: '❌ Die Anmeldephase ist beendet.', ephemeral: true });
+
+  // Gildenleiter bekommen eine Auswahlmöglichkeit
+  const team = await GuildTeam.findOne({ guildId: interaction.guild.id, leaderId: interaction.user.id });
+  if (team) {
+    const select = new StringSelectMenuBuilder()
+      .setCustomId(`arena_anmelden_type_select_${arenaId}`)
+      .setPlaceholder('Als wen anmelden?')
+      .addOptions(
+        new StringSelectMenuOptionBuilder().setLabel('Als Person').setValue('person').setDescription('Du trittst als Einzelperson an').setEmoji('👤'),
+        new StringSelectMenuOptionBuilder().setLabel('Als Gilde').setValue('gilde').setDescription(`${team.name} tritt als Gilde an`).setEmoji('⚔️'),
+      );
+    return interaction.reply({
+      embeds: [createEmbed({ title: '✋ Anmelden', color: COLORS.PRIMARY, description: `Möchtest du dich persönlich oder als Gildenleiter von **${team.name}** anmelden?` })],
+      components: [new ActionRowBuilder().addComponents(select)],
+      ephemeral: true,
+    });
+  }
+
+  // Kein Gildenleiter → direkt als Person anmelden
+  return registerPersonArena(interaction, arena);
+}
+
+async function registerPersonArena(interaction, arena) {
   if (arena.debaters.some(d => d.userId === interaction.user.id)) return interaction.reply({ content: '❌ Du bist bereits angemeldet.', ephemeral: true });
   if (arena.debaters.length >= ARENA.MAX_DEBATERS) return interaction.reply({ content: `❌ Maximum von ${ARENA.MAX_DEBATERS} Debattanten erreicht.`, ephemeral: true });
 
   arena.debaters.push({ userId: interaction.user.id });
   await arena.save();
-
   return interaction.reply({ content: '✅ Du bist als Debattant angemeldet!', ephemeral: true });
+}
+
+async function handleArenaAnmeldenTypeSelect(interaction) {
+  const arenaId = interaction.customId.replace('arena_anmelden_type_select_', '');
+  const arena   = await Arena.findById(arenaId);
+  if (!arena || arena.status !== 'offen') return interaction.update({ content: '❌ Arena nicht mehr verfügbar.', embeds: [], components: [] });
+
+  if (interaction.values[0] === 'person') {
+    if (arena.debaters.some(d => d.userId === interaction.user.id))
+      return interaction.update({ content: '❌ Du bist bereits angemeldet.', embeds: [], components: [] });
+    if (arena.debaters.length >= ARENA.MAX_DEBATERS)
+      return interaction.update({ content: `❌ Maximum von ${ARENA.MAX_DEBATERS} Debattanten erreicht.`, embeds: [], components: [] });
+    arena.debaters.push({ userId: interaction.user.id });
+    await arena.save();
+    return interaction.update({ content: '✅ Du bist als Debattant angemeldet!', embeds: [], components: [] });
+  }
+
+  // Gilde anmelden → Wager-Modal
+  const team = await GuildTeam.findOne({ guildId: interaction.guild.id, leaderId: interaction.user.id });
+  if (!team) return interaction.update({ content: '❌ Du bist kein Gildenleiter.', embeds: [], components: [] });
+  if (arena.guilds.length >= 2) return interaction.update({ content: '❌ Bereits zwei Gilden angemeldet.', embeds: [], components: [] });
+  if (arena.guilds.some(g => g.teamId === team._id.toString())) return interaction.update({ content: '❌ Deine Gilde ist bereits angemeldet.', embeds: [], components: [] });
+
+  const modal = new ModalBuilder()
+    .setCustomId(`modal_arena_wager_${arenaId}_${team._id}`)
+    .setTitle(`Gilde ${team.name} anmelden`);
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('wager')
+        .setLabel(`Wetteinsatz aus der Gildenkasse (min. ${ARENA.MIN_WAGER})`)
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setPlaceholder(`${ARENA.MIN_WAGER}`),
+    ),
+  );
+  return interaction.showModal(modal);
 }
 
 // ─── Gilde anmelden ──────────────────────────────────────────────────────────
@@ -623,6 +683,7 @@ module.exports = {
   handleArenaTypeSelect,
   handleArenaDauerModal,
   handleArenaAnmelden,
+  handleArenaAnmeldenTypeSelect,
   handleArenaGildeAnmelden,
   handleArenaWager,
   showArenaEinzahlenModal,

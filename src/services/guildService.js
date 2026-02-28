@@ -566,7 +566,19 @@ async function handleGildenViewDetail(interaction) {
   const { guild, user } = interaction;
   const team = await GuildTeam.findOne({ guildId: guild.id, members: user.id });
   if (!team) return interaction.update({ content: '❌ Du bist in keiner Gilde.', embeds: [], components: [] });
-  return interaction.update(buildGildenEmbed(team, user.id));
+  const payload = buildGildenEmbed(team, user.id);
+  payload.components.push(
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('gilden_back_main').setLabel('Zurück').setEmoji('🔙').setStyle(ButtonStyle.Secondary),
+    ),
+  );
+  return interaction.update(payload);
+}
+
+async function handleGildenBackMain(interaction) {
+  const { guild, user } = interaction;
+  const payload = await getGildenPayload(guild.id, user.id);
+  return interaction.update(payload);
 }
 
 async function handleManageView(interaction) {
@@ -577,12 +589,8 @@ async function handleManageView(interaction) {
 }
 
 async function handleRangliste(interaction) {
-  const { guild } = interaction;
+  const { guild, user } = interaction;
   const teams = await GuildTeam.find({ guildId: guild.id }).sort({ treasury: -1 }).lean();
-
-  if (!teams.length) {
-    return interaction.reply({ content: '❌ Noch keine Gilden vorhanden.', ephemeral: true });
-  }
 
   const medals = ['🥇', '🥈', '🥉'];
   const lines  = teams.map((t, i) => {
@@ -595,10 +603,11 @@ async function handleRangliste(interaction) {
   const embed = createEmbed({
     title:       '🏆 Gilden-Rangliste',
     color:       COLORS.GOLD,
-    description: lines.join('\n'),
+    description: teams.length ? lines.join('\n') : '*Noch keine Gilden vorhanden.*',
   });
 
-  return interaction.reply({ embeds: [embed], ephemeral: true });
+  const { components } = await getGildenPayload(guild.id, user.id);
+  return interaction.update({ embeds: [embed], components });
 }
 
 async function handleLeave(interaction) {
@@ -835,6 +844,8 @@ async function handleDonate(interaction) {
       ? `📅 Wochenbeitrag auf **${formatCoins(weekly)}** gesetzt.`
       : '📅 Wochenbeitrag deaktiviert.');
   }
+
+  await team.save();
 
   const payload = buildGildenEmbed(team);
   return interaction.reply({ ...payload, content: lines.join('\n'), ephemeral: true });
@@ -2290,12 +2301,14 @@ async function handleSetContribution(interaction) {
 }
 
 module.exports = {
+  buildGildenNavRows,
   getGildenPayload,
   handleAlleGildenView,
   handleAlleGildenPage,
   handleAlleGildenManifestToggle,
   handleGildenButton,
   handleGildenViewDetail,
+  handleGildenBackMain,
   handleManageView,
   handleRangliste,
   createGuildChannels,
